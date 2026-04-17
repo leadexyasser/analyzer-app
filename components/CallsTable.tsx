@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -140,6 +141,14 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                 <p className="text-sm text-blue-800">{analysis.coaching_notes}</p>
               </div>
             )}
+
+            <Link
+              href={`/dashboard/calls/${call.id}`}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors mt-1"
+              onClick={e => e.stopPropagation()}
+            >
+              View full details — transcript, audio &amp; complete analysis →
+            </Link>
           </div>
 
           {/* Scores sidebar */}
