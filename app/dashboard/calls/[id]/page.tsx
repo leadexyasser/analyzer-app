@@ -43,10 +43,8 @@ export default async function CallDetailPage({ params }: { params: Promise<{ id:
       <nav className="flex items-center gap-2 text-xs" aria-label="Breadcrumb">
         <Link
           href="/dashboard"
-          className="transition-colors"
+          className="transition-colors hover:text-[var(--rb-text)]"
           style={{ color: 'var(--rb-text-3)' }}
-          onMouseEnter={e => (e.currentTarget.style.color = 'var(--rb-text)')}
-          onMouseLeave={e => (e.currentTarget.style.color = 'var(--rb-text-3)')}
         >
           Dashboard
         </Link>
