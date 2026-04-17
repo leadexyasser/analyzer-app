@@ -33,6 +33,27 @@ export async function GET(
   return NextResponse.json({ ...call, audio_url })
 }
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const body = await request.json()
+  const supabase = createServiceClient()
+
+  const allowed: Record<string, unknown> = {}
+  if (typeof body.revenue === 'number' || body.revenue === null) allowed.revenue = body.revenue
+
+  if (Object.keys(allowed).length === 0) {
+    return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
+  }
+
+  const { error } = await supabase.from('calls').update(allowed).eq('id', id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ ok: true })
+}
+
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

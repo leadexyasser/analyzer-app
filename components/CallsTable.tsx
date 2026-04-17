@@ -101,6 +101,74 @@ function IntentBadge({ verdict }: { verdict: string | null }) {
 
 // ── expanded row ─────────────────────────────────────────────────────────────
 
+function RevenueEditor({ callId, initial }: { callId: string; initial: number | null }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(String(initial ?? ''))
+  const [saving, setSaving] = useState(false)
+  const [current, setCurrent] = useState(initial)
+
+  const save = async () => {
+    const num = parseFloat(value)
+    if (isNaN(num) && value !== '') return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/calls/${callId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revenue: value === '' ? null : num }),
+      })
+      if (res.ok) { setCurrent(value === '' ? null : num); setEditing(false) }
+      else toast.error('Failed to update revenue')
+    } catch { toast.error('Network error') }
+    finally { setSaving(false) }
+  }
+
+  if (editing) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="text-xs" style={{ color: 'var(--rb-text-3)' }}>$</span>
+        <input
+          autoFocus
+          type="number"
+          step="0.01"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+          className="w-24 text-xs tabular-nums rounded px-2 py-0.5"
+          style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-accent)', color: 'var(--rb-text)', outline: 'none' }}
+        />
+        <button
+          onClick={save}
+          disabled={saving}
+          className="text-[10px] font-bold px-2 py-0.5 rounded disabled:opacity-50"
+          style={{ background: 'var(--rb-accent)', color: '#0d1117' }}
+        >
+          {saving ? '…' : 'Save'}
+        </button>
+        <button
+          onClick={() => setEditing(false)}
+          className="text-[10px] px-2 py-0.5 rounded"
+          style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-3)', border: '1px solid var(--rb-border-2)' }}
+        >
+          Cancel
+        </button>
+      </span>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => { setValue(String(current ?? '')); setEditing(true) }}
+      className="group inline-flex items-center gap-1.5 text-xs tabular-nums transition-colors"
+      style={{ color: 'var(--rb-green)' }}
+      title="Click to edit revenue"
+    >
+      {current != null ? `$${Number(current).toFixed(2)}` : '—'}
+      <span className="text-[10px] opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--rb-text-3)' }}>✎</span>
+    </button>
+  )
+}
+
 function ExpandedRow({ call }: { call: Partial<Call> }) {
   const analysis = call.analysis as Analysis | null
   const fe = (analysis as any)?.final_expense
@@ -201,6 +269,12 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
 
             {analysis && (
               <div className="flex flex-wrap gap-2">
+                <span
+                  className="text-xs px-2.5 py-1 rounded-md inline-flex items-center gap-1.5"
+                  style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}
+                >
+                  Revenue: <RevenueEditor callId={call.id!} initial={call.revenue ?? null} />
+                </span>
                 <span
                   className="text-xs px-2.5 py-1 rounded-md"
                   style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}
