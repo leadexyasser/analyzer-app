@@ -115,7 +115,11 @@ export function parseRingbaPayload(raw: unknown): {
   const call_started_at = rawStarted ? new Date(rawStarted).toISOString() : null
 
   const rawRevenue = parsed.revenue ?? parsed.sale_amount
-  const rawPayout = parsed.payout ?? parsed.commission
+  const rawPayout  = parsed.payout  ?? parsed.commission
+  // Ringba sometimes puts the buyer payment in `payout` and sends revenue=0.
+  // If revenue is missing/zero but payout has a value, treat payout as revenue.
+  const effectiveRevenue =
+    rawRevenue != null && Number(rawRevenue) > 0 ? rawRevenue : rawPayout
 
   // Parse is_duplicate — Ringba may send "true"/"false" strings or booleans
   let is_duplicate: boolean | null = null
@@ -147,8 +151,8 @@ export function parseRingbaPayload(raw: unknown): {
     target_name: parsed.target_name ?? null,
     end_call_source: parsed.end_call_source ?? null,
     is_duplicate,
-    revenue: rawRevenue != null && !isNaN(Number(rawRevenue)) ? Number(rawRevenue) : null,
-    payout: rawPayout != null && !isNaN(Number(rawPayout)) ? Number(rawPayout) : null,
+    revenue: effectiveRevenue != null && !isNaN(Number(effectiveRevenue)) ? Number(effectiveRevenue) : null,
+    payout:  rawPayout      != null && !isNaN(Number(rawPayout))       ? Number(rawPayout)       : null,
     recording_url_original: parsed.recording_url ?? parsed.call_recording ?? parsed.recording ?? null,
     metadata,
   }
