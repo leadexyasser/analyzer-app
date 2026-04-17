@@ -4,30 +4,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
-function ReanalyzeButton({ callId }: { callId: string }) {
-  const [loading, setLoading] = useState(false)
-  const handleClick = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/calls/${callId}/reanalyze`, { method: 'POST' })
-      if (res.ok) toast.success('Re-analysis started — refresh in ~60s')
-      else toast.error((await res.json()).error ?? 'Failed')
-    } catch { toast.error('Network error') }
-    finally { setLoading(false) }
-  }
-  return (
-    <button
-      onClick={handleClick}
-      disabled={loading}
-      className="text-[10px] font-bold px-3 py-1.5 rounded-lg whitespace-nowrap disabled:opacity-50 transition-colors"
-      style={{ background: 'var(--rb-accent)', color: '#0d1117' }}
-    >
-      {loading ? 'Starting…' : 'Re-analyze now'}
-    </button>
-  )
-}
 import { Call } from '@/types/database'
+import { ReanalyzeButton } from '@/components/ReanalyzeButton'
 import { Analysis } from '@/types/analysis'
 import { ChevronDown, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from '@/lib/fe-scoring'
@@ -664,6 +642,7 @@ export function CallsTable() {
 
   const TH = ({ children }: { children: React.ReactNode }) => (
     <th
+      scope="col"
       className="text-left px-3 py-3 text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap"
       style={{ color: 'var(--rb-text-3)', background: 'var(--rb-sidebar)' }}
     >
@@ -702,9 +681,17 @@ export function CallsTable() {
         </button>
       </div>
 
-      {showFilters && (
-        <FiltersPanel filters={filters} onChange={setFilter} onReset={() => { setFilters(EMPTY); setPage(1) }} />
-      )}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateRows: showFilters ? '1fr' : '0fr',
+          transition: 'grid-template-rows 200ms ease',
+        }}
+      >
+        <div style={{ overflow: 'hidden' }}>
+          <FiltersPanel filters={filters} onChange={setFilter} onReset={() => { setFilters(EMPTY); setPage(1) }} />
+        </div>
+      </div>
 
       {/* Table */}
       <div
@@ -732,8 +719,28 @@ export function CallsTable() {
                 ))
               ) : calls.length === 0 ? (
                 <tr>
-                  <td colSpan={COLS.length + 1} className="px-4 py-16 text-center text-sm" style={{ color: 'var(--rb-text-3)' }}>
-                    No calls match your filters.
+                  <td colSpan={COLS.length + 1}>
+                    <div className="flex flex-col items-center justify-center py-16 gap-3">
+                      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--rb-text-3)' }}>
+                        <circle cx="16" cy="16" r="13" />
+                        <path d="M11 16h10M16 11v10" strokeLinecap="round" opacity=".4" />
+                      </svg>
+                      <p className="text-sm font-medium" style={{ color: 'var(--rb-text-2)' }}>No calls found</p>
+                      <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>
+                        {Object.values(filters).some(Boolean)
+                          ? 'Try adjusting your filters or clearing them to see all calls.'
+                          : 'Calls will appear here once Ringba sends webhook events.'}
+                      </p>
+                      {Object.values(filters).some(Boolean) && (
+                        <button
+                          onClick={() => { setFilters(EMPTY); setPage(1) }}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors mt-1"
+                          style={{ background: 'var(--rb-surface-2)', border: '1px solid var(--rb-border-2)', color: 'var(--rb-accent)' }}
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (

@@ -35,6 +35,7 @@ function money(v: number) {
 function TH({ children, right = false }: { children: React.ReactNode; right?: boolean }) {
   return (
     <th
+      scope="col"
       className={`px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}
       style={{ color: 'var(--rb-text-3)', background: 'var(--rb-sidebar)', borderBottom: '1px solid var(--rb-border)' }}
     >

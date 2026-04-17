@@ -1,19 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import { LogoutButton } from '@/components/LogoutButton'
-
-const NAV = [
-  {
-    label: 'Call Logs',
-    href: '/dashboard',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M2 2h12v2H2zM2 7h12v2H2zM2 12h8v2H2z" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-]
+import { NavLinks } from '@/components/NavLinks'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -52,22 +40,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 py-3 space-y-0.5 px-2">
-          <p className="text-[10px] font-semibold uppercase tracking-widest px-2 py-2" style={{ color: 'var(--rb-text-3)' }}>
-            Analytics
-          </p>
-          {NAV.map(item => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition-colors"
-              style={{ background: 'var(--rb-accent)' + '22', color: 'var(--rb-accent)' }}
-            >
-              {item.icon}
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        <NavLinks />
 
         {/* User */}
         <div className="px-3 py-4 space-y-2" style={{ borderTop: '1px solid var(--rb-border)' }}>
@@ -95,7 +68,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         >
           <div className="flex items-center gap-3 ml-auto">
             <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--rb-text-2)' }}>
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--rb-green)' }} />
               Live
             </div>
           </div>

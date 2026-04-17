@@ -8,30 +8,7 @@ import { TranscriptViewer } from '@/components/TranscriptViewer'
 import { FinalExpenseCard } from '@/components/FinalExpenseCard'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
-
-function ReanalyzeBtn({ callId }: { callId: string }) {
-  const [loading, setLoading] = useState(false)
-  const router = useRouter()
-  const handleClick = async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/calls/${callId}/reanalyze`, { method: 'POST' })
-      if (res.ok) { toast.success('Re-analysis started — page will refresh'); setTimeout(() => router.refresh(), 5000) }
-      else toast.error((await res.json()).error ?? 'Failed')
-    } catch { toast.error('Network error') }
-    finally { setLoading(false) }
-  }
-  return (
-    <button
-      onClick={handleClick}
-      disabled={loading}
-      className="shrink-0 text-xs font-bold px-4 py-2 rounded-lg disabled:opacity-50 whitespace-nowrap"
-      style={{ background: 'var(--rb-accent)', color: '#0d1117' }}
-    >
-      {loading ? 'Starting…' : 'Re-analyze now'}
-    </button>
-  )
-}
+import { ReanalyzeButton } from '@/components/ReanalyzeButton'
 
 interface Props { call: Call; audioUrl: string | null }
 
@@ -297,7 +274,7 @@ export function CallDetail({ call, audioUrl }: Props) {
                   This call was analyzed before the FE qualifier was added. Re-analyze to extract age, insurance interest, bank account, affordability, and compliance flags.
                 </p>
               </div>
-              <ReanalyzeBtn callId={call.id} />
+              <ReanalyzeButton callId={call.id} onSuccess={() => setTimeout(() => router.refresh(), 5000)} />
             </div>
           )}
 

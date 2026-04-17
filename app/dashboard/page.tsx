@@ -1,4 +1,7 @@
+import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
+
+export const metadata: Metadata = { title: 'Dashboard' }
 import { CallsTable } from '@/components/CallsTable'
 import { RetryStuckButton } from '@/components/RetryStuckButton'
 import { Timeline } from '@/components/Timeline'
@@ -170,22 +173,10 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+      {/* Stats — Row 1: Business KPIs */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Calls Today" value={String(stats.callsToday)} />
         <StatCard label={`Revenue (${label})`} value={`$${stats.revenue.toFixed(0)}`} accent />
-        <StatCard
-          label="FE Lead Quality"
-          value={stats.avgFEQuality != null ? `${stats.avgFEQuality}%` : '—'}
-          sub="avg weighted score"
-        />
-        <StatCard
-          label="Compliance Score"
-          value={stats.complianceScore != null ? `${stats.complianceScore}%` : '—'}
-          sub={stats.complianceTotal > 0 ? `${stats.complianceTotal} analyzed` : undefined}
-          accent={stats.complianceScore != null && stats.complianceScore >= 90}
-          warn={stats.complianceScore != null && stats.complianceScore < 80}
-        />
         <StatCard
           label="Closed Rate"
           value={stats.closedRate != null ? `${stats.closedRate}%` : '—'}
@@ -195,8 +186,24 @@ export default async function DashboardPage({
         <StatCard
           label="Overall CPA"
           value={stats.overallCPA != null ? `$${stats.overallCPA.toFixed(0)}` : '—'}
-          sub="total revenue ÷ closed"
+          sub="revenue ÷ closed sales"
           accent={stats.overallCPA != null}
+        />
+      </div>
+
+      {/* Stats — Row 2: Quality indicators */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <StatCard
+          label="FE Lead Quality"
+          value={stats.avgFEQuality != null ? `${stats.avgFEQuality}%` : '—'}
+          sub="avg weighted qualifier score"
+        />
+        <StatCard
+          label="Compliance Score"
+          value={stats.complianceScore != null ? `${stats.complianceScore}%` : '—'}
+          sub={stats.complianceTotal > 0 ? `${stats.complianceTotal} calls analyzed` : undefined}
+          accent={stats.complianceScore != null && stats.complianceScore >= 90}
+          warn={stats.complianceScore != null && stats.complianceScore < 80}
         />
         <div className="rounded-xl px-5 py-4" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
           <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--rb-text-3)' }}>Compliance Flags</p>

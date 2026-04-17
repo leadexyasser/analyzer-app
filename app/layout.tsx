@@ -6,7 +6,7 @@ import { Toaster } from '@/components/ui/sonner'
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 
 export const metadata: Metadata = {
-  title: 'Call Analyzer',
+  title: { default: 'Call Analyzer', template: '%s — Call Analyzer' },
   description: 'Final expense call analysis powered by AI',
 }
 

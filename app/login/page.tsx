@@ -64,10 +64,11 @@ export default function LoginPage() {
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold" style={{ color: 'var(--rb-text-2)' }}>
+                <label htmlFor="email" className="text-xs font-semibold" style={{ color: 'var(--rb-text-2)' }}>
                   Email address
                 </label>
                 <input
+                  id="email"
                   type="email"
                   placeholder="you@company.com"
                   value={email}
