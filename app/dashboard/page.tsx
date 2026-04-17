@@ -3,6 +3,7 @@ import { CallsTable } from '@/components/CallsTable'
 import { RetryStuckButton } from '@/components/RetryStuckButton'
 import { Timeline } from '@/components/Timeline'
 import { SummaryTable } from '@/components/SummaryTable'
+import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from '@/lib/fe-scoring'
 
 async function getStats() {
   const supabase = createServiceClient()
@@ -10,12 +11,10 @@ async function getStats() {
   todayStart.setHours(0, 0, 0, 0)
   const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-  const [todayRes, weekRevenueRes, weekQualityRes, weekFlagsRes, duplicatesRes, todayCallsRes, weekAllRes] = await Promise.all([
+  const [todayRes, weekRevenueRes, weekAnalysisRes, todayCallsRes, weekAllRes] = await Promise.all([
     supabase.from('calls').select('id', { count: 'exact', head: true }).gte('received_at', todayStart.toISOString()),
     supabase.from('calls').select('revenue').gte('received_at', weekStart.toISOString()).eq('status', 'complete').not('revenue', 'is', null),
-    supabase.from('calls').select('quality_score').gte('received_at', weekStart.toISOString()).eq('status', 'complete').not('quality_score', 'is', null),
-    supabase.from('calls').select('flags').gte('received_at', weekStart.toISOString()).eq('status', 'complete'),
-    supabase.from('calls').select('id', { count: 'exact', head: true }).gte('received_at', weekStart.toISOString()).eq('is_duplicate', true),
+    supabase.from('calls').select('analysis').gte('received_at', weekStart.toISOString()).eq('status', 'complete').not('analysis', 'is', null),
     // For timeline: all today's calls with timestamps
     supabase.from('calls').select('received_at').gte('received_at', todayStart.toISOString()),
     // For summary: all week's calls with grouping fields
@@ -24,17 +23,37 @@ async function getStats() {
 
   const callsToday = todayRes.count ?? 0
   const weekRevenue = (weekRevenueRes.data ?? []).reduce((s: number, r: any) => s + Number(r.revenue ?? 0), 0)
-  const scores = (weekQualityRes.data ?? []).map((r: any) => r.quality_score as number)
-  const avgQuality = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null
-  const duplicates = duplicatesRes.count ?? 0
 
-  const flagCounts: Record<string, number> = {}
-  for (const row of weekFlagsRes.data ?? []) {
-    for (const flag of (row.flags as string[] | null) ?? []) {
-      flagCounts[flag] = (flagCounts[flag] ?? 0) + 1
+  // FE Lead Quality: average computeFELeadQuality across calls that have FE data
+  const feScores: number[] = []
+  let complianceTotal = 0
+  let complianceClean = 0
+  const complianceFlagCounts: Record<string, number> = {}
+
+  for (const row of weekAnalysisRes.data ?? []) {
+    const fe = (row.analysis as any)?.final_expense
+    if (!fe) continue
+
+    const score = computeFELeadQuality(fe)
+    if (score !== null) feScores.push(score)
+
+    complianceTotal++
+    if (hasComplianceIssue(fe)) {
+      for (const key of Object.keys(COMPLIANCE_FLAG_LABELS)) {
+        if (fe[key]) complianceFlagCounts[key] = (complianceFlagCounts[key] ?? 0) + 1
+      }
+    } else {
+      complianceClean++
     }
   }
-  const topFlags = Object.entries(flagCounts).sort((a, b) => b[1] - a[1]).slice(0, 3)
+
+  const avgFEQuality = feScores.length ? Math.round(feScores.reduce((a, b) => a + b, 0) / feScores.length) : null
+  const complianceScore = complianceTotal > 0 ? Math.round((complianceClean / complianceTotal) * 100) : null
+
+  const topFlags = Object.entries(complianceFlagCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([key, count]) => [COMPLIANCE_FLAG_LABELS[key] ?? key, count] as [string, number])
 
   // Timeline: bucket by hour
   const hourly = Array(24).fill(0)
@@ -70,7 +89,7 @@ async function getStats() {
   const byCampaign = [...campaignMap.values()].sort((a, b) => b.incoming - a.incoming)
   const byPublisher = [...publisherMap.values()].sort((a, b) => b.incoming - a.incoming)
 
-  return { callsToday, weekRevenue, avgQuality, duplicates, topFlags, totalWeekCalls: scores.length, hourly, byCampaign, byPublisher }
+  return { callsToday, weekRevenue, avgFEQuality, complianceScore, complianceTotal, topFlags, hourly, byCampaign, byPublisher }
 }
 
 function StatCard({ label, value, sub, accent = false, warn = false }: {
@@ -107,25 +126,26 @@ export default async function DashboardPage() {
         <StatCard label="Calls Today" value={String(stats.callsToday)} />
         <StatCard label="Revenue (7d)" value={`$${stats.weekRevenue.toFixed(0)}`} accent />
         <StatCard
-          label="Avg Quality (7d)"
-          value={stats.avgQuality != null ? String(stats.avgQuality) : '—'}
-          sub="out of 100"
+          label="FE Lead Quality (7d)"
+          value={stats.avgFEQuality != null ? `${stats.avgFEQuality}` : '—'}
+          sub="avg weighted score / 100"
         />
         <StatCard
-          label="Duplicates (7d)"
-          value={String(stats.duplicates)}
-          sub={stats.totalWeekCalls > 0 ? `${((stats.duplicates / stats.totalWeekCalls) * 100).toFixed(1)}% rate` : undefined}
-          warn={stats.duplicates > 0}
+          label="Compliance Score (7d)"
+          value={stats.complianceScore != null ? `${stats.complianceScore}%` : '—'}
+          sub={stats.complianceTotal > 0 ? `${stats.complianceTotal} analyzed calls` : undefined}
+          accent={stats.complianceScore != null && stats.complianceScore >= 90}
+          warn={stats.complianceScore != null && stats.complianceScore < 80}
         />
         <div className="rounded-xl px-5 py-4" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--rb-text-3)' }}>Top Flags (7d)</p>
+          <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--rb-text-3)' }}>Compliance Flags (7d)</p>
           {stats.topFlags.length === 0
-            ? <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>None</p>
+            ? <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>None detected</p>
             : <ul className="space-y-1">
-                {stats.topFlags.map(([flag, count]) => (
-                  <li key={flag} className="flex justify-between items-center text-xs">
-                    <span className="truncate" style={{ color: 'var(--rb-text-2)' }}>{flag.replace(/_/g, ' ')}</span>
-                    <span className="font-bold ml-2 tabular-nums" style={{ color: 'var(--rb-text)' }}>{count}</span>
+                {stats.topFlags.map(([label, count]) => (
+                  <li key={label} className="flex justify-between items-center text-xs">
+                    <span className="truncate" style={{ color: 'var(--rb-text-2)' }}>{label}</span>
+                    <span className="font-bold ml-2 tabular-nums" style={{ color: 'var(--rb-red)' }}>{count}</span>
                   </li>
                 ))}
               </ul>

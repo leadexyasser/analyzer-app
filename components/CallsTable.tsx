@@ -30,6 +30,7 @@ function ReanalyzeButton({ callId }: { callId: string }) {
 import { Call } from '@/types/database'
 import { Analysis } from '@/types/analysis'
 import { ChevronDown, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
+import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from '@/lib/fe-scoring'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -103,6 +104,11 @@ function IntentBadge({ verdict }: { verdict: string | null }) {
 function ExpandedRow({ call }: { call: Partial<Call> }) {
   const analysis = call.analysis as Analysis | null
   const fe = (analysis as any)?.final_expense
+  const feLeadQuality = computeFELeadQuality(fe)
+  const complianceClean = fe ? !hasComplianceIssue(fe) : null
+  const complianceFlagList = fe
+    ? Object.entries(COMPLIANCE_FLAG_LABELS).filter(([key]) => fe[key]).map(([, label]) => label)
+    : []
 
   return (
     <tr>
@@ -287,6 +293,66 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
 
           {/* Scores */}
           <div className="space-y-3">
+
+            {/* FE Lead Quality */}
+            {feLeadQuality !== null && (
+              <div
+                className="rounded-xl p-4 space-y-2"
+                style={{ background: 'var(--rb-surface-2)', border: '1px solid var(--rb-border-2)' }}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
+                  FE Lead Quality
+                </p>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 rounded-full h-2" style={{ background: 'var(--rb-border)' }}>
+                    <div
+                      className="h-2 rounded-full"
+                      style={{
+                        width: `${feLeadQuality}%`,
+                        background: feLeadQuality >= 70 ? 'var(--rb-green)' : feLeadQuality >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)',
+                      }}
+                    />
+                  </div>
+                  <span
+                    className="text-base font-bold tabular-nums w-10 text-right"
+                    style={{ color: feLeadQuality >= 70 ? 'var(--rb-green)' : feLeadQuality >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)' }}
+                  >
+                    {feLeadQuality}
+                  </span>
+                </div>
+                <p className="text-[10px]" style={{ color: 'var(--rb-text-3)' }}>weighted qualifier score / 100</p>
+              </div>
+            )}
+
+            {/* Compliance */}
+            {complianceClean !== null && (
+              <div
+                className="rounded-xl p-4 space-y-2"
+                style={{
+                  background: complianceClean ? '#071a10' : '#1c0808',
+                  border: `1px solid ${complianceClean ? '#0d3321' : '#3d1212'}`,
+                }}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
+                  Compliance
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold" style={{ color: complianceClean ? 'var(--rb-green)' : 'var(--rb-red)' }}>
+                    {complianceClean ? '✓ Clean' : '⚠ Issues detected'}
+                  </span>
+                </div>
+                {complianceFlagList.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {complianceFlagList.map(label => (
+                      <span key={label} className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ background: '#200a0a', color: '#f04438', border: '1px solid #3d1212' }}>
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {analysis && (
               <div
                 className="rounded-xl p-4 space-y-3"
