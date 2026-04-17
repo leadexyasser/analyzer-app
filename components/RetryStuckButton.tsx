@@ -13,11 +13,8 @@ export function RetryStuckButton() {
       const data = await res.json()
       if (res.ok) {
         const total = (data.reset ?? 0) + (data.requeued ?? 0)
-        if (total === 0) {
-          toast.success('No stuck calls found — everything looks good')
-        } else {
-          toast.success(`Restarted ${total} stuck call${total !== 1 ? 's' : ''} — processing now`)
-        }
+        if (total === 0) toast.success('No stuck calls — everything is processing')
+        else toast.success(`Restarted ${total} stuck call${total !== 1 ? 's' : ''}`)
       } else {
         toast.error('Failed to retry stuck calls')
       }
@@ -32,9 +29,22 @@ export function RetryStuckButton() {
     <button
       onClick={handleClick}
       disabled={loading}
-      className="flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+      className="flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
+      style={{
+        background: 'var(--rb-surface)',
+        border: '1px solid var(--rb-border-2)',
+        color: 'var(--rb-text-2)',
+      }}
+      onMouseEnter={e => {
+        (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--rb-accent)'
+        ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--rb-accent)'
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--rb-border-2)'
+        ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--rb-text-2)'
+      }}
     >
-      <span className={`w-2 h-2 rounded-full ${loading ? 'bg-amber-400 animate-pulse' : 'bg-slate-300'}`} />
+      <span className={`w-2 h-2 rounded-full ${loading ? 'bg-amber-400 animate-pulse' : 'bg-[#283347]'}`} />
       {loading ? 'Restarting…' : 'Retry stuck calls'}
     </button>
   )

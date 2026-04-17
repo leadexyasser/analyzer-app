@@ -2,16 +2,11 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Button } from '@/components/ui/button'
 import { Call } from '@/types/database'
 import { Analysis } from '@/types/analysis'
 import { ChevronDown, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 function fmt(date: string | null) {
   if (!date) return '—'
@@ -20,222 +15,258 @@ function fmt(date: string | null) {
     hour: 'numeric', minute: '2-digit', hour12: true,
   })
 }
-
 function dur(sec: number | null) {
   if (!sec) return '—'
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${m}:${String(s).padStart(2, '0')}`
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
 }
-
 function money(v: number | null) {
   if (v == null) return '—'
   return `$${Number(v).toFixed(2)}`
 }
 
-// ── small UI atoms ────────────────────────────────────────────────────────────
+// ── atoms ─────────────────────────────────────────────────────────────────────
 
 function QBadge({ score }: { score: number | null }) {
-  if (score == null) return <span className="text-slate-400 text-xs">—</span>
-  const cls = score >= 70
-    ? 'bg-emerald-100 text-emerald-800'
-    : score >= 40
-    ? 'bg-amber-100 text-amber-800'
-    : 'bg-red-100 text-red-800'
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>{score}</span>
+  if (score == null) return <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
+  const [bg, color] =
+    score >= 70 ? ['#0d2e1e', '#12b76a']
+    : score >= 40 ? ['#2e1f04', '#f79009']
+    : ['#2e0d0d', '#f04438']
+  return (
+    <span className="text-xs font-bold px-2 py-0.5 rounded-md tabular-nums" style={{ background: bg, color }}>
+      {score}
+    </span>
+  )
 }
 
-function StatusDot({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    complete: 'bg-emerald-500',
-    failed: 'bg-red-500',
-    pending: 'bg-slate-400',
-    downloading: 'bg-sky-500',
-    transcribing: 'bg-violet-500',
-    analyzing: 'bg-indigo-500',
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, [string, string]> = {
+    complete:    ['#0d2e1e', '#12b76a'],
+    failed:      ['#2e0d0d', '#f04438'],
+    pending:     ['#1e2d40', '#7a8fa6'],
+    downloading: ['#0d1e2e', '#38bdf8'],
+    transcribing:['#1a0d2e', '#a78bfa'],
+    analyzing:   ['#0d142e', '#6366f1'],
   }
-  const label: Record<string, string> = {
-    complete: 'Complete',
-    failed: 'Failed',
-    pending: 'Pending',
-    downloading: 'Downloading',
-    transcribing: 'Transcribing',
-    analyzing: 'Analyzing',
-  }
-  const dot = map[status] ?? 'bg-slate-400'
+  const [bg, color] = map[status] ?? ['#1e2d40', '#7a8fa6']
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-      {label[status] ?? status}
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-md" style={{ background: bg, color }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+      {status}
     </span>
   )
 }
 
 function IntentBadge({ verdict }: { verdict: string | null }) {
   if (!verdict) return null
-  const map: Record<string, string> = {
-    qualified: 'bg-emerald-100 text-emerald-800',
-    borderline: 'bg-amber-100 text-amber-800',
-    unqualified: 'bg-red-100 text-red-800',
-    invalid: 'bg-slate-100 text-slate-600',
+  const map: Record<string, [string, string]> = {
+    qualified:   ['#0d2e1e', '#12b76a'],
+    borderline:  ['#2e1f04', '#f79009'],
+    unqualified: ['#2e0d0d', '#f04438'],
+    invalid:     ['#1e2d40', '#7a8fa6'],
   }
+  const [bg, color] = map[verdict] ?? ['#1e2d40', '#7a8fa6']
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${map[verdict] ?? 'bg-slate-100 text-slate-600'}`}>
+    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: bg, color }}>
       {verdict}
     </span>
   )
 }
 
-// ── inline expanded row ───────────────────────────────────────────────────────
+// ── expanded row ─────────────────────────────────────────────────────────────
 
 function ExpandedRow({ call }: { call: Partial<Call> }) {
   const analysis = call.analysis as Analysis | null
-
-  const intentColor = (score: number) =>
-    score >= 70 ? 'bg-emerald-500' : score >= 40 ? 'bg-amber-500' : 'bg-red-500'
+  const fe = (analysis as any)?.final_expense
 
   return (
     <tr>
-      <td colSpan={13} className="px-0 py-0 bg-slate-50 border-b border-slate-200">
+      <td
+        colSpan={14}
+        style={{ background: 'var(--rb-sidebar)', borderBottom: '1px solid var(--rb-border)' }}
+      >
         <div className="px-6 py-5 grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* Summary */}
           <div className="lg:col-span-2 space-y-4">
             <div>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Call Summary</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--rb-text-3)' }}>
+                Call Summary
+              </p>
               {analysis?.summary
-                ? <p className="text-sm text-slate-700 leading-relaxed">{analysis.summary}</p>
-                : <p className="text-sm text-slate-400 italic">{call.status !== 'complete' ? `Processing… (${call.status})` : 'No analysis'}</p>
+                ? <p className="text-sm leading-relaxed" style={{ color: 'var(--rb-text-2)' }}>{analysis.summary}</p>
+                : <p className="text-sm italic" style={{ color: 'var(--rb-text-3)' }}>
+                    {call.status !== 'complete' ? `Processing… (${call.status})` : 'No analysis'}
+                  </p>
               }
             </div>
 
             {analysis && (
-              <div className="flex flex-wrap gap-2 text-xs">
-                <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
-                  Outcome: <strong className="text-slate-800">{analysis.call_outcome.replace(/_/g, ' ')}</strong>
+              <div className="flex flex-wrap gap-2">
+                <span
+                  className="text-xs px-2.5 py-1 rounded-md"
+                  style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}
+                >
+                  Outcome: <strong style={{ color: 'var(--rb-text)' }}>{analysis.call_outcome.replace(/_/g, ' ')}</strong>
                 </span>
-                <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
-                  Language: <strong className="text-slate-800">{analysis.language}</strong>
+                <span
+                  className="text-xs px-2.5 py-1 rounded-md"
+                  style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}
+                >
+                  Language: <strong style={{ color: 'var(--rb-text)' }}>{analysis.language.toUpperCase()}</strong>
                 </span>
-                <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
-                  Confidence: <strong className="text-slate-800">{analysis.outcome_confidence}</strong>
+                <span
+                  className="text-xs px-2.5 py-1 rounded-md"
+                  style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}
+                >
+                  Confidence: <strong style={{ color: 'var(--rb-text)' }}>{analysis.outcome_confidence}</strong>
                 </span>
               </div>
             )}
 
-            {/* Flags */}
             {(call.flags?.length ?? 0) > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {(call.flags ?? []).map(flag => (
-                  <span key={flag} className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded text-xs">
+                  <span
+                    key={flag}
+                    className="text-xs px-2 py-0.5 rounded"
+                    style={{ background: '#2e0d0d', color: '#f04438', border: '1px solid #3d1212' }}
+                  >
                     {flag.replace(/_/g, ' ')}
                   </span>
                 ))}
               </div>
             )}
 
-            {/* Final Expense quick verdict */}
-            {(analysis as any)?.final_expense && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-medium">Final Expense:</span>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                  (analysis as any).final_expense.qualifier_verdict === 'qualified' ? 'bg-emerald-100 text-emerald-800'
-                  : (analysis as any).final_expense.qualifier_verdict === 'borderline' ? 'bg-amber-100 text-amber-800'
-                  : (analysis as any).final_expense.qualifier_verdict === 'compliance_risk' ? 'bg-red-200 text-red-900'
-                  : 'bg-red-100 text-red-800'
-                }`}>
-                  {(analysis as any).final_expense.qualifier_verdict.replace('_', ' ')} · {(analysis as any).final_expense.qualifier_score}/100
+            {/* Final Expense quick row */}
+            {fe && (
+              <div
+                className="rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap"
+                style={{ background: 'var(--rb-surface-2)', border: '1px solid var(--rb-border-2)' }}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
+                  Final Expense
                 </span>
+                <span
+                  className="text-xs font-bold px-2 py-0.5 rounded-md"
+                  style={{
+                    background: fe.qualifier_verdict === 'qualified' ? '#0d2e1e'
+                      : fe.qualifier_verdict === 'borderline' ? '#2e1f04'
+                      : '#2e0d0d',
+                    color: fe.qualifier_verdict === 'qualified' ? '#12b76a'
+                      : fe.qualifier_verdict === 'borderline' ? '#f79009'
+                      : '#f04438',
+                  }}
+                >
+                  {fe.qualifier_verdict.replace('_', ' ')} · {fe.qualifier_score}/100
+                </span>
+                {fe.age_mentioned && (
+                  <span className="text-xs" style={{ color: 'var(--rb-text-2)' }}>
+                    Age: <strong style={{ color: 'var(--rb-text)' }}>{fe.age_mentioned}</strong>
+                  </span>
+                )}
+                {(fe.free_government_mentions || fe.outbound_call_claimed || fe.ftc_regulatory_mention || fe.scam_keywords_mentioned || fe.misleading_ad_mention) && (
+                  <span className="text-xs font-bold" style={{ color: '#f04438' }}>⚠ Compliance Issue</span>
+                )}
               </div>
             )}
 
-            {/* Coaching */}
             {analysis?.coaching_notes && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-                <p className="text-xs font-semibold text-blue-600 mb-1">Coaching Note</p>
-                <p className="text-sm text-blue-800">{analysis.coaching_notes}</p>
+              <div
+                className="rounded-lg px-4 py-3"
+                style={{ background: '#0d1e30', border: '1px solid #1a3352' }}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: '#38bdf8' }}>
+                  Coaching Note
+                </p>
+                <p className="text-xs leading-relaxed" style={{ color: '#7cc8f0' }}>{analysis.coaching_notes}</p>
               </div>
             )}
 
             <Link
               href={`/dashboard/calls/${call.id}`}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors mt-1"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold transition-colors"
+              style={{ color: 'var(--rb-accent)' }}
               onClick={e => e.stopPropagation()}
             >
-              View full details — transcript, audio &amp; complete analysis →
+              View full details — transcript, audio &amp; analysis →
             </Link>
           </div>
 
-          {/* Scores sidebar */}
-          <div className="space-y-4">
-            {/* Quality */}
+          {/* Scores */}
+          <div className="space-y-3">
             {analysis && (
-              <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Quality Score</p>
+              <div
+                className="rounded-xl p-4 space-y-3"
+                style={{ background: 'var(--rb-surface-2)', border: '1px solid var(--rb-border-2)' }}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
+                  Quality Score
+                </p>
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 bg-slate-100 rounded-full h-2.5">
+                  <div className="flex-1 rounded-full h-2" style={{ background: 'var(--rb-border)' }}>
                     <div
-                      className={`h-2.5 rounded-full ${analysis.quality_score >= 70 ? 'bg-emerald-500' : analysis.quality_score >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
-                      style={{ width: `${analysis.quality_score}%` }}
+                      className="h-2 rounded-full"
+                      style={{
+                        width: `${analysis.quality_score}%`,
+                        background: analysis.quality_score >= 70 ? 'var(--rb-green)' : analysis.quality_score >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)',
+                      }}
                     />
                   </div>
-                  <span className="text-lg font-bold text-slate-900 w-10 text-right">{analysis.quality_score}</span>
+                  <span
+                    className="text-base font-bold tabular-nums w-10 text-right"
+                    style={{ color: analysis.quality_score >= 70 ? 'var(--rb-green)' : analysis.quality_score >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)' }}
+                  >
+                    {analysis.quality_score}
+                  </span>
                 </div>
-                <div className="space-y-1.5 pt-1">
-                  {Object.entries(analysis.quality_breakdown).map(([k, v]) => (
-                    <div key={k} className="flex items-center gap-2 text-xs">
-                      <span className="text-slate-500 w-40 shrink-0">{k.replace(/_/g, ' ')}</span>
-                      <div className="flex-1 bg-slate-100 rounded-full h-1.5">
-                        <div className={`h-1.5 rounded-full ${(v / 10) >= 0.7 ? 'bg-emerald-400' : (v / 10) >= 0.4 ? 'bg-amber-400' : 'bg-red-400'}`}
-                          style={{ width: `${(v as number / 10) * 100}%` }} />
-                      </div>
-                      <span className="w-8 text-right font-medium text-slate-700">{v as number}/10</span>
+                {Object.entries(analysis.quality_breakdown).map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-2 text-xs">
+                    <span className="w-36 shrink-0 capitalize" style={{ color: 'var(--rb-text-3)' }}>{k.replace(/_/g, ' ')}</span>
+                    <div className="flex-1 rounded-full h-1" style={{ background: 'var(--rb-border)' }}>
+                      <div
+                        className="h-1 rounded-full"
+                        style={{
+                          width: `${(v as number / 10) * 100}%`,
+                          background: (v as number) >= 7 ? 'var(--rb-green)' : (v as number) >= 4 ? 'var(--rb-amber)' : 'var(--rb-red)',
+                        }}
+                      />
                     </div>
-                  ))}
-                </div>
+                    <span className="w-6 text-right font-medium" style={{ color: 'var(--rb-text-2)' }}>{v as number}</span>
+                  </div>
+                ))}
               </div>
             )}
 
-            {/* Lead Intent */}
             {analysis?.lead_intent && (
-              <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Lead Intent</p>
+              <div
+                className="rounded-xl p-4 space-y-3"
+                style={{ background: 'var(--rb-surface-2)', border: '1px solid var(--rb-border-2)' }}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
+                  Lead Intent
+                </p>
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 bg-slate-100 rounded-full h-2.5">
+                  <div className="flex-1 rounded-full h-2" style={{ background: 'var(--rb-border)' }}>
                     <div
-                      className={`h-2.5 rounded-full ${intentColor(analysis.lead_intent.score)}`}
-                      style={{ width: `${analysis.lead_intent.score}%` }}
+                      className="h-2 rounded-full"
+                      style={{
+                        width: `${analysis.lead_intent.score}%`,
+                        background: analysis.lead_intent.score >= 70 ? 'var(--rb-green)' : analysis.lead_intent.score >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)',
+                      }}
                     />
                   </div>
-                  <span className="text-lg font-bold text-slate-900 w-10 text-right">{analysis.lead_intent.score}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <IntentBadge verdict={analysis.lead_intent.verdict} />
-                  <span className="text-xs text-slate-500">
-                    {analysis.lead_intent.is_genuine_inquiry ? '✓ Genuine inquiry' : '✗ Not genuine'}
+                  <span className="text-base font-bold tabular-nums w-10 text-right" style={{ color: 'var(--rb-text)' }}>
+                    {analysis.lead_intent.score}
                   </span>
                 </div>
+                <IntentBadge verdict={analysis.lead_intent.verdict} />
                 {analysis.lead_intent.misalignment_reason && (
-                  <p className="text-xs text-amber-700 bg-amber-50 rounded px-2.5 py-2 border border-amber-200">
-                    {analysis.lead_intent.misalignment_reason}
-                  </p>
-                )}
-                {analysis.lead_intent.red_flags.length > 0 && (
-                  <div>
-                    <p className="text-xs text-slate-400 mb-1">Red flags</p>
-                    <ul className="space-y-0.5">
-                      {analysis.lead_intent.red_flags.map((r, i) => (
-                        <li key={i} className="text-xs text-red-700 flex gap-1.5">
-                          <span>·</span><span>{r}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  <p className="text-xs italic" style={{ color: 'var(--rb-amber)' }}>{analysis.lead_intent.misalignment_reason}</p>
                 )}
               </div>
             )}
           </div>
-
         </div>
       </td>
     </tr>
@@ -245,95 +276,112 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
 // ── filters ───────────────────────────────────────────────────────────────────
 
 interface Filters {
-  status: string
-  campaign: string
-  publisher: string
-  target_name: string
-  caller_id: string
-  end_call_source: string
-  is_duplicate: string
-  min_score: string
-  max_score: string
-  from: string
-  to: string
+  status: string; campaign: string; publisher: string; target_name: string
+  caller_id: string; end_call_source: string; is_duplicate: string
+  min_score: string; max_score: string; from: string; to: string
 }
-
-const EMPTY_FILTERS: Filters = {
+const EMPTY: Filters = {
   status: '', campaign: '', publisher: '', target_name: '',
   caller_id: '', end_call_source: '', is_duplicate: '',
   min_score: '', max_score: '', from: '', to: '',
 }
 
-function FiltersPanel({
-  filters,
-  onChange,
-  onReset,
-}: {
-  filters: Filters
-  onChange: (k: keyof Filters, v: string) => void
-  onReset: () => void
+const inputStyle = {
+  background: 'var(--rb-surface-2)',
+  border: '1px solid var(--rb-border-2)',
+  color: 'var(--rb-text)',
+  borderRadius: '0.375rem',
+  fontSize: '12px',
+  padding: '5px 10px',
+  outline: 'none',
+  width: '100%',
+}
+
+function DarkInput({ placeholder, value, onChange, type = 'text' }: {
+  placeholder?: string; value: string; onChange: (v: string) => void; type?: string
+}) {
+  return (
+    <input
+      type={type}
+      placeholder={placeholder}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      style={inputStyle}
+      onFocus={e => (e.currentTarget.style.borderColor = 'var(--rb-accent)')}
+      onBlur={e => (e.currentTarget.style.borderColor = 'var(--rb-border-2)')}
+    />
+  )
+}
+
+function DarkSelect({ value, onChange, children }: {
+  value: string; onChange: (v: string) => void; children: React.ReactNode
+}) {
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      style={{ ...inputStyle, cursor: 'pointer' }}
+      onFocus={e => (e.currentTarget.style.borderColor = 'var(--rb-accent)')}
+      onBlur={e => (e.currentTarget.style.borderColor = 'var(--rb-border-2)')}
+    >
+      {children}
+    </select>
+  )
+}
+
+function FiltersPanel({ filters, onChange, onReset }: {
+  filters: Filters; onChange: (k: keyof Filters, v: string) => void; onReset: () => void
 }) {
   const hasActive = Object.values(filters).some(Boolean)
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+    <div
+      className="rounded-xl p-4 space-y-3"
+      style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}
+    >
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
-        <Input placeholder="Campaign" value={filters.campaign}
-          onChange={e => onChange('campaign', e.target.value)} className="text-xs h-8" />
-        <Input placeholder="Publisher / Source" value={filters.publisher}
-          onChange={e => onChange('publisher', e.target.value)} className="text-xs h-8" />
-        <Input placeholder="Target name" value={filters.target_name}
-          onChange={e => onChange('target_name', e.target.value)} className="text-xs h-8" />
-        <Input placeholder="Caller ID" value={filters.caller_id}
-          onChange={e => onChange('caller_id', e.target.value)} className="text-xs h-8" />
-        <Input placeholder="End call source" value={filters.end_call_source}
-          onChange={e => onChange('end_call_source', e.target.value)} className="text-xs h-8" />
+        <DarkInput placeholder="Campaign" value={filters.campaign} onChange={v => onChange('campaign', v)} />
+        <DarkInput placeholder="Publisher / Source" value={filters.publisher} onChange={v => onChange('publisher', v)} />
+        <DarkInput placeholder="Target name" value={filters.target_name} onChange={v => onChange('target_name', v)} />
+        <DarkInput placeholder="Caller ID" value={filters.caller_id} onChange={v => onChange('caller_id', v)} />
+        <DarkInput placeholder="End call source" value={filters.end_call_source} onChange={v => onChange('end_call_source', v)} />
 
-        <Select value={filters.status || 'all'}
-          onValueChange={(v: string | null) => onChange('status', (!v || v === 'all') ? '' : v)}>
-          <SelectTrigger className="text-xs h-8"><SelectValue placeholder="Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="complete">Complete</SelectItem>
-            <SelectItem value="failed">Failed</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="downloading">Downloading</SelectItem>
-            <SelectItem value="transcribing">Transcribing</SelectItem>
-            <SelectItem value="analyzing">Analyzing</SelectItem>
-          </SelectContent>
-        </Select>
+        <DarkSelect value={filters.status || 'all'} onChange={v => onChange('status', v === 'all' ? '' : v)}>
+          <option value="all">All statuses</option>
+          <option value="complete">Complete</option>
+          <option value="failed">Failed</option>
+          <option value="pending">Pending</option>
+          <option value="downloading">Downloading</option>
+          <option value="transcribing">Transcribing</option>
+          <option value="analyzing">Analyzing</option>
+        </DarkSelect>
 
-        <Select value={filters.is_duplicate || 'all'}
-          onValueChange={(v: string | null) => onChange('is_duplicate', (!v || v === 'all') ? '' : v)}>
-          <SelectTrigger className="text-xs h-8"><SelectValue placeholder="Duplicate" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="true">Duplicates only</SelectItem>
-            <SelectItem value="false">Unique only</SelectItem>
-          </SelectContent>
-        </Select>
+        <DarkSelect value={filters.is_duplicate || 'all'} onChange={v => onChange('is_duplicate', v === 'all' ? '' : v)}>
+          <option value="all">Duplicates: All</option>
+          <option value="true">Duplicates only</option>
+          <option value="false">Unique only</option>
+        </DarkSelect>
 
-        <Input placeholder="Min score" type="number" value={filters.min_score}
-          onChange={e => onChange('min_score', e.target.value)} className="text-xs h-8" />
-        <Input placeholder="Max score" type="number" value={filters.max_score}
-          onChange={e => onChange('max_score', e.target.value)} className="text-xs h-8" />
-
-        <Input type="date" value={filters.from}
-          onChange={e => onChange('from', e.target.value)} className="text-xs h-8" />
-        <Input type="date" value={filters.to}
-          onChange={e => onChange('to', e.target.value)} className="text-xs h-8" />
+        <DarkInput placeholder="Min score" type="number" value={filters.min_score} onChange={v => onChange('min_score', v)} />
+        <DarkInput placeholder="Max score" type="number" value={filters.max_score} onChange={v => onChange('max_score', v)} />
+        <DarkInput type="date" value={filters.from} onChange={v => onChange('from', v)} />
+        <DarkInput type="date" value={filters.to} onChange={v => onChange('to', v)} />
       </div>
-
       {hasActive && (
-        <button onClick={onReset}
-          className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-500 transition-colors">
-          <X size={12} /> Clear filters
+        <button
+          onClick={onReset}
+          className="flex items-center gap-1 text-xs transition-colors"
+          style={{ color: 'var(--rb-text-3)' }}
+          onMouseEnter={e => (e.currentTarget.style.color = 'var(--rb-red)')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'var(--rb-text-3)')}
+        >
+          <X size={11} /> Clear filters
         </button>
       )}
     </div>
   )
 }
 
-// ── main component ────────────────────────────────────────────────────────────
+// ── main ─────────────────────────────────────────────────────────────────────
 
 export function CallsTable() {
   const [calls, setCalls] = useState<Partial<Call>[]>([])
@@ -342,7 +390,7 @@ export function CallsTable() {
   const [page, setPage] = useState(1)
   const [showFilters, setShowFilters] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
+  const [filters, setFilters] = useState<Filters>(EMPTY)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const fetchCalls = useCallback(async (p: number, f: Filters) => {
@@ -358,10 +406,7 @@ export function CallsTable() {
     if (f.min_score) params.set('min_score', f.min_score)
     if (f.max_score) params.set('max_score', f.max_score)
     if (f.from) params.set('from', new Date(f.from).toISOString())
-    if (f.to) {
-      const d = new Date(f.to); d.setHours(23, 59, 59, 999)
-      params.set('to', d.toISOString())
-    }
+    if (f.to) { const d = new Date(f.to); d.setHours(23, 59, 59, 999); params.set('to', d.toISOString()) }
     const res = await fetch(`/api/calls?${params}`)
     const data = await res.json()
     setCalls(data.calls ?? [])
@@ -375,73 +420,81 @@ export function CallsTable() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [page, filters, fetchCalls])
 
-  const setFilter = (k: keyof Filters, v: string) => {
-    setFilters(f => ({ ...f, [k]: v }))
-    setPage(1)
-  }
-  const resetFilters = () => { setFilters(EMPTY_FILTERS); setPage(1) }
+  const setFilter = (k: keyof Filters, v: string) => { setFilters(f => ({ ...f, [k]: v })); setPage(1) }
   const totalPages = Math.ceil(total / 50)
+  const activeFilterCount = Object.values(filters).filter(Boolean).length
 
-  const cols = [
-    'Date', 'Source', 'Campaign', 'Caller ID', 'Dialed #',
-    'Dup', 'End Source', 'Target', 'Revenue', 'Payout', 'Duration', 'Quality', 'Status',
-  ]
+  const TH = ({ children }: { children: React.ReactNode }) => (
+    <th
+      className="text-left px-3 py-3 text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap"
+      style={{ color: 'var(--rb-text-3)', background: 'var(--rb-sidebar)' }}
+    >
+      {children}
+    </th>
+  )
+
+  const COLS = ['Date', 'Source', 'Campaign', 'Caller ID', 'Dialed #', 'Dup', 'End Source', 'Target', 'Revenue', 'Payout', 'Duration', 'Quality', 'Status']
 
   return (
     <div className="space-y-3">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">
-          <span className="font-semibold text-slate-900">{total.toLocaleString()}</span> calls
+        <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>
+          <span className="font-semibold tabular-nums" style={{ color: 'var(--rb-text)' }}>{total.toLocaleString()}</span> calls
         </p>
-        <Button
-          variant="outline"
-          size="sm"
-          className={`gap-2 text-xs ${showFilters ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : ''}`}
+        <button
           onClick={() => setShowFilters(s => !s)}
+          className="flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+          style={{
+            background: showFilters ? 'var(--rb-accent)' + '22' : 'var(--rb-surface)',
+            border: `1px solid ${showFilters ? 'var(--rb-accent)' : 'var(--rb-border-2)'}`,
+            color: showFilters ? 'var(--rb-accent)' : 'var(--rb-text-2)',
+          }}
         >
           <SlidersHorizontal size={13} />
           Filters
-          {Object.values(filters).some(Boolean) && (
-            <span className="bg-indigo-600 text-white text-[10px] font-bold w-4 h-4 rounded-full inline-flex items-center justify-center">
-              {Object.values(filters).filter(Boolean).length}
+          {activeFilterCount > 0 && (
+            <span
+              className="text-[10px] font-bold w-4 h-4 rounded-full inline-flex items-center justify-center"
+              style={{ background: 'var(--rb-accent)', color: '#0d1117' }}
+            >
+              {activeFilterCount}
             </span>
           )}
-        </Button>
+        </button>
       </div>
 
       {showFilters && (
-        <FiltersPanel filters={filters} onChange={setFilter} onReset={resetFilters} />
+        <FiltersPanel filters={filters} onChange={setFilter} onReset={() => { setFilters(EMPTY); setPage(1) }} />
       )}
 
       {/* Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div
+        className="rounded-xl overflow-hidden"
+        style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}
+      >
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50">
-                <th className="w-8" />
-                {cols.map(c => (
-                  <th key={c} className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
-                    {c}
-                  </th>
-                ))}
+              <tr style={{ borderBottom: '1px solid var(--rb-border)' }}>
+                <th style={{ width: 32, background: 'var(--rb-sidebar)' }} />
+                {COLS.map(c => <TH key={c}>{c}</TH>)}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                Array.from({ length: 6 }).map((_, i) => (
-                  <tr key={i} className="border-b border-slate-100">
-                    <td />{cols.map((_, j) => (
+                Array.from({ length: 7 }).map((_, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid var(--rb-border)' }}>
+                    <td />{COLS.map((_, j) => (
                       <td key={j} className="px-3 py-3">
-                        <Skeleton className="h-4 w-full rounded" />
+                        <div className="h-3 rounded animate-pulse" style={{ background: 'var(--rb-surface-2)' }} />
                       </td>
                     ))}
                   </tr>
                 ))
               ) : calls.length === 0 ? (
                 <tr>
-                  <td colSpan={cols.length + 1} className="px-4 py-12 text-center text-slate-400 text-sm">
+                  <td colSpan={COLS.length + 1} className="px-4 py-16 text-center text-sm" style={{ color: 'var(--rb-text-3)' }}>
                     No calls match your filters.
                   </td>
                 </tr>
@@ -454,79 +507,66 @@ export function CallsTable() {
                   const row = (
                     <tr
                       key={call.id}
-                      className={`border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
+                      className="cursor-pointer transition-colors"
+                      style={{ borderBottom: '1px solid var(--rb-border)' }}
+                      onMouseEnter={e => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--rb-surface-2)'}
+                      onMouseLeave={e => (e.currentTarget as HTMLTableRowElement).style.background = isExpanded ? 'var(--rb-surface-2)' : 'transparent'}
                       onClick={() => setExpandedId(isExpanded ? null : (call.id ?? null))}
                     >
-                      <td className="pl-3 py-3 text-slate-400">
-                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      <td className="pl-3 py-3">
+                        <span style={{ color: 'var(--rb-text-3)' }}>
+                          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        </span>
                       </td>
-                      {/* Date */}
-                      <td className="px-3 py-3 whitespace-nowrap text-xs text-slate-600">
+                      <td className="px-3 py-3 whitespace-nowrap text-xs tabular-nums" style={{ color: 'var(--rb-text-2)' }}>
                         {fmt(call.received_at ?? null)}
                       </td>
-                      {/* Source (publisher) */}
                       <td className="px-3 py-3 max-w-[100px]">
-                        <span className="text-xs text-slate-700 truncate block">{call.publisher_name ?? '—'}</span>
+                        <span className="text-xs truncate block" style={{ color: 'var(--rb-text-2)' }}>{call.publisher_name ?? '—'}</span>
                       </td>
-                      {/* Campaign */}
                       <td className="px-3 py-3 max-w-[140px]">
-                        <span className="text-xs text-slate-700 truncate block">{call.campaign_name ?? '—'}</span>
+                        <span className="text-xs truncate block" style={{ color: 'var(--rb-text)' }}>{call.campaign_name ?? '—'}</span>
                       </td>
-                      {/* Caller ID */}
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <span className="text-xs font-mono text-slate-700">{call.caller_id ?? '—'}</span>
+                        <span className="text-xs font-mono" style={{ color: 'var(--rb-text-2)' }}>{call.caller_id ?? '—'}</span>
                       </td>
-                      {/* Dialed number */}
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <span className="text-xs font-mono text-slate-600">{call.target_number ?? '—'}</span>
+                        <span className="text-xs font-mono" style={{ color: 'var(--rb-text-3)' }}>{(call as any).target_number ?? '—'}</span>
                       </td>
-                      {/* Is duplicate */}
                       <td className="px-3 py-3">
-                        {call.is_duplicate == null ? (
-                          <span className="text-slate-400 text-xs">—</span>
-                        ) : call.is_duplicate ? (
-                          <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded">DUP</span>
-                        ) : (
-                          <span className="text-slate-400 text-xs">No</span>
-                        )}
+                        {(call as any).is_duplicate == null
+                          ? <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
+                          : (call as any).is_duplicate
+                          ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#2e1f04', color: '#f79009' }}>DUP</span>
+                          : <span className="text-xs" style={{ color: 'var(--rb-text-3)' }}>No</span>}
                       </td>
-                      {/* End call source */}
                       <td className="px-3 py-3 max-w-[100px]">
-                        <span className="text-xs text-slate-600 truncate block">{call.end_call_source ?? '—'}</span>
+                        <span className="text-xs truncate block" style={{ color: 'var(--rb-text-3)' }}>{(call as any).end_call_source ?? '—'}</span>
                       </td>
-                      {/* Target name */}
                       <td className="px-3 py-3 max-w-[120px]">
-                        <span className="text-xs text-slate-700 truncate block">{call.target_name ?? '—'}</span>
+                        <span className="text-xs truncate block" style={{ color: 'var(--rb-text-2)' }}>{(call as any).target_name ?? '—'}</span>
                       </td>
-                      {/* Revenue */}
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <span className="text-xs font-semibold text-emerald-700">{money(call.revenue ?? null)}</span>
+                        <span className="text-xs font-semibold tabular-nums" style={{ color: 'var(--rb-green)' }}>{money(call.revenue ?? null)}</span>
                       </td>
-                      {/* Payout */}
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <span className="text-xs text-slate-600">{money(call.payout ?? null)}</span>
+                        <span className="text-xs tabular-nums" style={{ color: 'var(--rb-text-3)' }}>{money(call.payout ?? null)}</span>
                       </td>
-                      {/* Duration */}
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <span className="text-xs text-slate-600 tabular-nums">{dur(call.duration_seconds ?? null)}</span>
+                        <span className="text-xs tabular-nums" style={{ color: 'var(--rb-text-2)' }}>{dur(call.duration_seconds ?? null)}</span>
                       </td>
-                      {/* Quality + lead intent */}
                       <td className="px-3 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
                           <QBadge score={call.quality_score ?? null} />
                           {leadVerdict && <IntentBadge verdict={leadVerdict} />}
                         </div>
                       </td>
-                      {/* Status */}
                       <td className="px-3 py-3">
-                        <StatusDot status={call.status ?? 'pending'} />
+                        <StatusBadge status={call.status ?? 'pending'} />
                       </td>
                     </tr>
                   )
-
-                  return isExpanded
-                    ? [row, <ExpandedRow key={`${call.id}-exp`} call={call} />]
-                    : [row]
+                  return isExpanded ? [row, <ExpandedRow key={`${call.id}-exp`} call={call} />] : [row]
                 })
               )}
             </tbody>
@@ -535,17 +575,32 @@ export function CallsTable() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
-            <span className="text-xs text-slate-500">Page {page} of {totalPages}</span>
+          <div
+            className="flex items-center justify-between px-4 py-3"
+            style={{ borderTop: '1px solid var(--rb-border)' }}
+          >
+            <span className="text-xs" style={{ color: 'var(--rb-text-3)' }}>
+              Page {page} of {totalPages}
+            </span>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" disabled={page === 1}
-                onClick={() => setPage(p => p - 1)} className="text-xs h-7">
-                Previous
-              </Button>
-              <Button variant="outline" size="sm" disabled={page === totalPages}
-                onClick={() => setPage(p => p + 1)} className="text-xs h-7">
-                Next
-              </Button>
+              {[
+                { label: 'Previous', disabled: page === 1, onClick: () => setPage(p => p - 1) },
+                { label: 'Next', disabled: page === totalPages, onClick: () => setPage(p => p + 1) },
+              ].map(btn => (
+                <button
+                  key={btn.label}
+                  disabled={btn.disabled}
+                  onClick={btn.onClick}
+                  className="text-xs px-3 py-1.5 rounded-md font-medium transition-colors disabled:opacity-40"
+                  style={{
+                    background: 'var(--rb-surface-2)',
+                    border: '1px solid var(--rb-border-2)',
+                    color: 'var(--rb-text-2)',
+                  }}
+                >
+                  {btn.label}
+                </button>
+              ))}
             </div>
           </div>
         )}

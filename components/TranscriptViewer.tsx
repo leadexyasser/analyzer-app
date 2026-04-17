@@ -2,15 +2,8 @@
 
 import { useMemo } from 'react'
 
-interface Segment {
-  start: number
-  end: number
-  text: string
-}
-
-interface LabeledSegment extends Segment {
-  speaker: 'A' | 'B'
-}
+interface Segment { start: number; end: number; text: string }
+interface LabeledSegment extends Segment { speaker: 'A' | 'B' }
 
 interface Props {
   transcriptText: string
@@ -21,66 +14,57 @@ interface Props {
 }
 
 function fmt(s: number) {
-  const m = Math.floor(s / 60)
-  const ss = Math.floor(s % 60)
-  return `${m}:${String(ss).padStart(2, '0')}`
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 }
 
 export function TranscriptViewer({ transcriptText, segments, agentSpeaker = 'unclear', currentTime = 0, onSeek }: Props) {
   const labeled = useMemo<LabeledSegment[]>(() => {
     if (!segments.length) return []
-    const PAUSE_THRESHOLD = 1.5
-    let currentSpeaker: 'A' | 'B' = 'A'
-    let lastEnd = segments[0].end
+    let sp: 'A' | 'B' = 'A', lastEnd = segments[0].end
     return segments.map((seg, i) => {
-      if (i > 0 && seg.start - lastEnd > PAUSE_THRESHOLD) {
-        currentSpeaker = currentSpeaker === 'A' ? 'B' : 'A'
-      }
+      if (i > 0 && seg.start - lastEnd > 1.5) sp = sp === 'A' ? 'B' : 'A'
       lastEnd = seg.end
-      return { ...seg, speaker: currentSpeaker }
+      return { ...seg, speaker: sp }
     })
   }, [segments])
 
   if (!labeled.length) {
     return (
-      <div className="bg-slate-50 rounded-2xl border border-slate-200 p-6">
-        <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed text-slate-700">
-          {transcriptText || 'No transcript available.'}
-        </pre>
-      </div>
+      <pre
+        className="text-sm whitespace-pre-wrap font-mono leading-relaxed max-h-[520px] overflow-y-auto p-4 rounded-xl"
+        style={{ background: 'var(--rb-sidebar)', color: 'var(--rb-text-2)', border: '1px solid var(--rb-border)' }}
+      >
+        {transcriptText || 'No transcript available.'}
+      </pre>
     )
   }
 
   const agentIsA = agentSpeaker === 'Speaker A'
   const agentIsB = agentSpeaker === 'Speaker B'
-
-  const labelFor = (speaker: 'A' | 'B') => {
-    if (agentIsA && speaker === 'A') return 'Agent'
-    if (agentIsA && speaker === 'B') return 'Caller'
-    if (agentIsB && speaker === 'B') return 'Agent'
-    if (agentIsB && speaker === 'A') return 'Caller'
-    return `Speaker ${speaker}`
+  const isAgent = (sp: 'A' | 'B') => (agentIsA && sp === 'A') || (agentIsB && sp === 'B')
+  const labelFor = (sp: 'A' | 'B') => {
+    if (agentIsA) return sp === 'A' ? 'Agent' : 'Caller'
+    if (agentIsB) return sp === 'B' ? 'Agent' : 'Caller'
+    return `Speaker ${sp}`
   }
-
-  const isAgent = (speaker: 'A' | 'B') => {
-    return (agentIsA && speaker === 'A') || (agentIsB && speaker === 'B')
-  }
-
-  const isActive = (seg: LabeledSegment) =>
-    currentTime >= seg.start && currentTime < seg.end
+  const isActive = (seg: LabeledSegment) => currentTime >= seg.start && currentTime < seg.end
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-4 text-xs text-slate-500 px-1">
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded-full bg-indigo-500 inline-block" />
+      <div className="flex items-center gap-4 px-1">
+        <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--rb-text-3)' }}>
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--rb-accent)' }} />
           Agent
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded-full bg-slate-400 inline-block" />
+        <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--rb-text-3)' }}>
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#374761' }} />
           Caller
         </span>
-        {onSeek && <span className="ml-auto text-slate-400">Click timestamp to jump</span>}
+        {onSeek && (
+          <span className="ml-auto text-xs" style={{ color: 'var(--rb-text-3)' }}>
+            Tap timestamp to jump
+          </span>
+        )}
       </div>
 
       <div className="space-y-1 max-h-[520px] overflow-y-auto pr-1">
@@ -88,20 +72,21 @@ export function TranscriptViewer({ transcriptText, segments, agentSpeaker = 'unc
           const agent = isAgent(seg.speaker)
           const active = isActive(seg)
           const label = labelFor(seg.speaker)
-
-          // Group consecutive same-speaker segments into visual bubbles
           const prevSame = i > 0 && labeled[i - 1].speaker === seg.speaker
-          const nextSame = i < labeled.length - 1 && labeled[i + 1].speaker === seg.speaker
 
           return (
-            <div
-              key={i}
-              className={`flex gap-3 ${agent ? 'flex-row-reverse' : 'flex-row'} ${prevSame ? 'mt-0.5' : 'mt-3'}`}
-            >
-              {/* Avatar — only show on first segment of a run */}
+            <div key={i} className={`flex gap-3 ${agent ? 'flex-row-reverse' : 'flex-row'} ${prevSame ? 'mt-0.5' : 'mt-4'}`}>
+              {/* Avatar */}
               <div className="w-7 shrink-0 flex flex-col items-center">
                 {!prevSame && (
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${agent ? 'bg-indigo-500' : 'bg-slate-400'}`}>
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold"
+                    style={{
+                      background: agent ? 'var(--rb-accent)' + '33' : '#1e2d40',
+                      color: agent ? 'var(--rb-accent)' : '#7a8fa6',
+                      border: `1px solid ${agent ? 'var(--rb-accent)' + '44' : '#283347'}`,
+                    }}
+                  >
                     {label.slice(0, 2).toUpperCase()}
                   </div>
                 )}
@@ -110,23 +95,31 @@ export function TranscriptViewer({ transcriptText, segments, agentSpeaker = 'unc
               {/* Bubble */}
               <div className={`flex flex-col max-w-[72%] ${agent ? 'items-end' : 'items-start'}`}>
                 {!prevSame && (
-                  <span className={`text-[11px] font-semibold mb-0.5 ${agent ? 'text-indigo-600 text-right' : 'text-slate-500'}`}>
+                  <span
+                    className="text-[11px] font-semibold mb-1"
+                    style={{ color: agent ? 'var(--rb-accent)' : 'var(--rb-text-3)' }}
+                  >
                     {label}
                   </span>
                 )}
                 <div
-                  className={`relative px-4 py-2.5 rounded-2xl text-sm leading-relaxed transition-all ${
-                    agent
-                      ? `bg-indigo-600 text-white ${!prevSame ? 'rounded-tr-sm' : ''} ${!nextSame ? '' : ''}`
-                      : `bg-white border border-slate-200 text-slate-800 ${!prevSame ? 'rounded-tl-sm' : ''}`
-                  } ${active ? 'ring-2 ring-amber-400 ring-offset-1 scale-[1.01]' : ''}`}
+                  className="px-4 py-2.5 rounded-2xl text-sm leading-relaxed transition-all"
+                  style={{
+                    background: agent ? '#00c9a722' : 'var(--rb-surface-2)',
+                    border: `1px solid ${agent ? '#00c9a733' : 'var(--rb-border-2)'}`,
+                    color: agent ? '#a7f3e8' : 'var(--rb-text-2)',
+                    ...(active ? { outline: '2px solid #f79009', outlineOffset: '2px', transform: 'scale(1.01)' } : {}),
+                  }}
                 >
                   {seg.text.trim()}
                 </div>
                 {onSeek && (
                   <button
                     onClick={() => onSeek(seg.start)}
-                    className={`text-[10px] mt-0.5 tabular-nums transition-colors ${agent ? 'text-indigo-300 hover:text-white' : 'text-slate-400 hover:text-indigo-500'}`}
+                    className="text-[10px] mt-1 tabular-nums transition-colors"
+                    style={{ color: 'var(--rb-text-3)' }}
+                    onMouseEnter={e => (e.currentTarget.style.color = 'var(--rb-accent)')}
+                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--rb-text-3)')}
                   >
                     {fmt(seg.start)}
                   </button>

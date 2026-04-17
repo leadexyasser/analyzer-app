@@ -6,16 +6,16 @@ import { Toaster } from '@/components/ui/sonner'
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 
 export const metadata: Metadata = {
-  title: 'Ringba Call Analyzer',
-  description: 'Analyze and transcribe inbound call recordings from Ringba',
+  title: 'Call Analyzer',
+  description: 'Final expense call analysis powered by AI',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${geist.variable} h-full antialiased`}>
-      <body className="min-h-full bg-background text-foreground">
+      <body className="min-h-full" style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
         {children}
-        <Toaster />
+        <Toaster theme="dark" />
       </body>
     </html>
   )

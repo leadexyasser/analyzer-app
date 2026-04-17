@@ -40,49 +40,76 @@ async function getStats() {
   return { callsToday, weekRevenue, avgQuality, duplicates, topFlags, outcomeCounts, totalWeekCalls: scores.length }
 }
 
+function StatCard({
+  label, value, sub, accent = false, warn = false,
+}: {
+  label: string; value: string; sub?: string; accent?: boolean; warn?: boolean
+}) {
+  const valColor = accent ? 'var(--rb-accent)' : warn ? 'var(--rb-amber)' : 'var(--rb-text)'
+  return (
+    <div
+      className="rounded-xl px-5 py-4 space-y-1"
+      style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
+        {label}
+      </p>
+      <p className="text-2xl font-bold tabular-nums" style={{ color: valColor }}>{value}</p>
+      {sub && <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>{sub}</p>}
+    </div>
+  )
+}
+
 export default async function DashboardPage() {
   const stats = await getStats()
 
-  const qualityColor = stats.avgQuality == null ? 'text-slate-400' :
-    stats.avgQuality >= 70 ? 'text-emerald-600' :
-    stats.avgQuality >= 40 ? 'text-amber-600' : 'text-red-600'
+  const qColor = stats.avgQuality == null ? 'var(--rb-text-3)'
+    : stats.avgQuality >= 70 ? 'var(--rb-green)'
+    : stats.avgQuality >= 40 ? 'var(--rb-amber)'
+    : 'var(--rb-red)'
 
   return (
-    <div className="space-y-6">
-      {/* Toolbar */}
-      <div className="flex justify-end">
+    <div className="space-y-5">
+
+      {/* Page title + actions */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-base font-semibold" style={{ color: 'var(--rb-text)' }}>Call Logs</h1>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--rb-text-3)' }}>Final Expense · All campaigns</p>
+        </div>
         <RetryStuckButton />
       </div>
 
-      {/* Stats row */}
+      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Calls Today</p>
-          <p className="text-3xl font-bold text-slate-900 mt-1">{stats.callsToday}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Revenue (7d)</p>
-          <p className="text-3xl font-bold text-emerald-600 mt-1">${stats.weekRevenue.toFixed(0)}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Avg Quality (7d)</p>
-          <p className={`text-3xl font-bold mt-1 ${qualityColor}`}>{stats.avgQuality ?? '—'}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Duplicates (7d)</p>
-          <p className="text-3xl font-bold text-slate-900 mt-1">{stats.duplicates}</p>
-          {stats.totalWeekCalls > 0 && (
-            <p className="text-xs text-slate-400 mt-0.5">{((stats.duplicates / stats.totalWeekCalls) * 100).toFixed(1)}% rate</p>
-          )}
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Top Flags (7d)</p>
-          {stats.topFlags.length === 0 ? <p className="text-sm text-slate-400 mt-1">None</p> : (
-            <ul className="mt-1 space-y-0.5">
+        <StatCard label="Calls Today" value={String(stats.callsToday)} />
+        <StatCard label="Revenue (7d)" value={`$${stats.weekRevenue.toFixed(0)}`} accent />
+        <StatCard
+          label="Avg Quality (7d)"
+          value={stats.avgQuality != null ? String(stats.avgQuality) : '—'}
+          sub="out of 100"
+        />
+        <StatCard
+          label="Duplicates (7d)"
+          value={String(stats.duplicates)}
+          sub={stats.totalWeekCalls > 0 ? `${((stats.duplicates / stats.totalWeekCalls) * 100).toFixed(1)}% rate` : undefined}
+          warn={stats.duplicates > 0}
+        />
+        <div
+          className="rounded-xl px-5 py-4"
+          style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--rb-text-3)' }}>
+            Top Flags (7d)
+          </p>
+          {stats.topFlags.length === 0 ? (
+            <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>None</p>
+          ) : (
+            <ul className="space-y-1">
               {stats.topFlags.map(([flag, count]) => (
-                <li key={flag} className="flex justify-between text-xs">
-                  <span className="text-slate-600 truncate">{flag.replace(/_/g, ' ')}</span>
-                  <span className="font-semibold text-slate-900 ml-2">{count}</span>
+                <li key={flag} className="flex justify-between items-center text-xs">
+                  <span className="truncate" style={{ color: 'var(--rb-text-2)' }}>{flag.replace(/_/g, ' ')}</span>
+                  <span className="font-bold ml-2 tabular-nums" style={{ color: 'var(--rb-text)' }}>{count}</span>
                 </li>
               ))}
             </ul>
@@ -90,6 +117,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {/* Table */}
       <CallsTable />
     </div>
   )
