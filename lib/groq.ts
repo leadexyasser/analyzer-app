@@ -194,6 +194,10 @@ Scoring:
 
 Return the JSON now.`
 
+// Groq llama-3.3-70b limit is ~12k TPM. Prompt template ~2k tokens.
+// Cap transcript at ~24k chars (~6k tokens) to stay safely under limit.
+const MAX_TRANSCRIPT_CHARS = 24_000
+
 export async function analyzeCall(params: {
   callId: string
   transcript_text: string
@@ -202,12 +206,17 @@ export async function analyzeCall(params: {
   duration_seconds: number | null
   revenue: number | null
 }) {
+  const rawTranscript = params.transcript_text || '(no transcript)'
+  const transcript = rawTranscript.length > MAX_TRANSCRIPT_CHARS
+    ? rawTranscript.slice(0, MAX_TRANSCRIPT_CHARS) + '\n\n[transcript truncated — call too long]'
+    : rawTranscript
+
   const prompt = ANALYSIS_PROMPT_TEMPLATE
     .replace('{campaign_name}', params.campaign_name ?? 'Unknown')
     .replace('{buyer_name}', params.buyer_name ?? 'Unknown')
     .replace('{duration_seconds}', String(params.duration_seconds ?? 0))
     .replace('{revenue}', String(params.revenue ?? 0))
-    .replace('{transcript_text}', params.transcript_text || '(no transcript)')
+    .replace('{transcript_text}', transcript)
 
   const start = Date.now()
 
