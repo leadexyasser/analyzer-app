@@ -1,14 +1,8 @@
 import { z } from 'zod'
 import crypto from 'crypto'
 
-/**
- * Ringba sends call postbacks when a call completes. The payload structure
- * varies by campaign configuration — we accept a wide set of known field names
- * and map them to our internal schema. All fields are optional since Ringba
- * allows custom payload templates.
- */
 export const RingbaWebhookSchema = z.object({
-  // Primary identifiers — try multiple common field names
+  // Primary identifiers
   call_id: z.string().optional(),
   callId: z.string().optional(),
   call_uuid: z.string().optional(),
@@ -43,11 +37,13 @@ export const RingbaWebhookSchema = z.object({
   // Campaign
   campaign_name: z.string().optional(),
   campaign: z.string().optional(),
+  campaign_id: z.string().optional(),
 
-  // Buyer
+  // Buyer / target
   buyer_name: z.string().optional(),
   buyer: z.string().optional(),
   target_name: z.string().optional(),
+  target_id: z.string().optional(),
 
   // Publisher
   publisher_name: z.string().optional(),
@@ -64,7 +60,21 @@ export const RingbaWebhookSchema = z.object({
   recording_url: z.string().url().optional(),
   call_recording: z.string().url().optional(),
   recording: z.string().url().optional(),
-}).passthrough() // accept any extra fields without failing
+
+  // Call outcome / quality
+  end_call_source: z.string().optional(),
+  is_duplicate: z.union([z.string(), z.boolean()]).optional(),
+
+  // Caller location
+  zip_code: z.string().optional(),
+
+  // UTM tracking
+  utm_campaign: z.string().optional(),
+  utm_content: z.string().optional(),
+  utm_medium: z.string().optional(),
+  utm_id: z.string().optional(),
+  utm_source: z.string().optional(),
+}).passthrough()
 
 export type RingbaWebhook = z.infer<typeof RingbaWebhookSchema>
 
@@ -76,11 +86,17 @@ export function parseRingbaPayload(raw: unknown): {
   caller_id: string | null
   target_number: string | null
   campaign_name: string | null
+  campaign_id: string | null
   buyer_name: string | null
   publisher_name: string | null
+  target_id: string | null
+  target_name: string | null
+  end_call_source: string | null
+  is_duplicate: boolean | null
   revenue: number | null
   payout: number | null
   recording_url_original: string | null
+  metadata: Record<string, unknown>
 } {
   const parsed = RingbaWebhookSchema.parse(raw)
 
@@ -101,6 +117,21 @@ export function parseRingbaPayload(raw: unknown): {
   const rawRevenue = parsed.revenue ?? parsed.sale_amount
   const rawPayout = parsed.payout ?? parsed.commission
 
+  // Parse is_duplicate — Ringba may send "true"/"false" strings or booleans
+  let is_duplicate: boolean | null = null
+  if (parsed.is_duplicate != null) {
+    is_duplicate = parsed.is_duplicate === true || parsed.is_duplicate === 'true' || parsed.is_duplicate === '1'
+  }
+
+  // Collect UTM params and extra data into metadata
+  const metadata: Record<string, unknown> = {}
+  if (parsed.utm_campaign) metadata.utm_campaign = parsed.utm_campaign
+  if (parsed.utm_content) metadata.utm_content = parsed.utm_content
+  if (parsed.utm_medium) metadata.utm_medium = parsed.utm_medium
+  if (parsed.utm_id) metadata.utm_id = parsed.utm_id
+  if (parsed.utm_source) metadata.utm_source = parsed.utm_source
+  if (parsed.zip_code) metadata.zip_code = parsed.zip_code
+
   return {
     ringba_call_id,
     parsed,
@@ -109,26 +140,26 @@ export function parseRingbaPayload(raw: unknown): {
     caller_id: parsed.caller_id ?? parsed.caller ?? parsed.ani ?? parsed.from ?? parsed.inbound_phone_number ?? null,
     target_number: parsed.dialed_number ?? parsed.target_number ?? parsed.dnis ?? parsed.to ?? null,
     campaign_name: parsed.campaign_name ?? parsed.campaign ?? null,
-    buyer_name: parsed.buyer_name ?? parsed.buyer ?? parsed.target_name ?? null,
+    campaign_id: parsed.campaign_id ?? null,
+    buyer_name: parsed.buyer_name ?? parsed.buyer ?? null,
     publisher_name: parsed.publisher_name ?? parsed.publisher ?? parsed.affiliate_name ?? null,
+    target_id: parsed.target_id ?? null,
+    target_name: parsed.target_name ?? null,
+    end_call_source: parsed.end_call_source ?? null,
+    is_duplicate,
     revenue: rawRevenue != null && !isNaN(Number(rawRevenue)) ? Number(rawRevenue) : null,
     payout: rawPayout != null && !isNaN(Number(rawPayout)) ? Number(rawPayout) : null,
     recording_url_original: parsed.recording_url ?? parsed.call_recording ?? parsed.recording ?? null,
+    metadata,
   }
 }
 
-/**
- * Verify Ringba webhook signature if a secret is configured.
- * Returns true if no secret is set (signature verification is optional).
- * Ringba does not publicly document a standard signature scheme —
- * this implementation tries HMAC-SHA256 over the raw body.
- */
 export function verifySignature(
   rawBody: string,
   signatureHeader: string | null,
   secret: string | null
 ): boolean {
-  if (!secret) return true // verification not configured
+  if (!secret) return true
   if (!signatureHeader) return false
 
   const expected = crypto
