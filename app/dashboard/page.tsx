@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { CallsTable } from '@/components/CallsTable'
+import { RetryStuckButton } from '@/components/RetryStuckButton'
 
 async function getStats() {
   const supabase = createServiceClient()
@@ -48,6 +49,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Toolbar */}
+      <div className="flex justify-end">
+        <RetryStuckButton />
+      </div>
+
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
