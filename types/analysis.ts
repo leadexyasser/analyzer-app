@@ -26,6 +26,41 @@ export const LeadIntentSchema = z.object({
   misalignment_reason: z.string().nullable(),
 })
 
+export const FinalExpenseQualifierSchema = z.object({
+  // ── Qualifying factors ───────────────────────────────────────────────────
+  age_mentioned: z.number().nullable(),
+  age_verdict: z.enum(['good', 'borderline', 'bad', 'unknown']),
+
+  interested_in_life_insurance: z.enum(['yes', 'no', 'unclear']),
+  insurance_interest_notes: z.string().nullable(),
+
+  has_bank_account: z.enum(['yes', 'no', 'unclear']),
+
+  can_afford: z.enum(['yes', 'concerns', 'no', 'unclear']),
+  affordability_notes: z.string().nullable(),
+
+  // ── Compliance flags ─────────────────────────────────────────────────────
+  free_government_mentions: z.boolean(),
+  free_government_quotes: z.array(z.string()),
+
+  outbound_call_claimed: z.boolean(),
+  outbound_call_quote: z.string().nullable(),
+
+  ftc_regulatory_mention: z.boolean(),
+  ftc_quote: z.string().nullable(),
+
+  scam_keywords_mentioned: z.boolean(),
+  scam_quotes: z.array(z.string()),
+
+  misleading_ad_mention: z.boolean(),
+  misleading_quotes: z.array(z.string()),
+
+  // ── Overall ──────────────────────────────────────────────────────────────
+  qualifier_score: z.number().int().min(0).max(100),
+  qualifier_verdict: z.enum(['qualified', 'borderline', 'disqualified', 'compliance_risk']),
+  qualifier_summary: z.string(),
+})
+
 export const ValidFlags = [
   'agent_unprofessional',
   'agent_script_deviation',
@@ -67,6 +102,7 @@ export const AnalysisSchema = z.object({
   flags: z.array(z.string()),
   flag_details: z.record(z.string(), z.string()),
   coaching_notes: z.string().nullable(),
+  final_expense: FinalExpenseQualifierSchema.optional().nullable(),
 })
 
 export type Analysis = z.infer<typeof AnalysisSchema>
@@ -74,3 +110,4 @@ export type CallOutcome = z.infer<typeof CallOutcomeEnum>
 export type QualityBreakdown = z.infer<typeof QualityBreakdownSchema>
 export type ExtractedData = z.infer<typeof ExtractedDataSchema>
 export type LeadIntent = z.infer<typeof LeadIntentSchema>
+export type FinalExpenseQualifier = z.infer<typeof FinalExpenseQualifierSchema>

@@ -134,6 +134,21 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
               </div>
             )}
 
+            {/* Final Expense quick verdict */}
+            {(analysis as any)?.final_expense && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-medium">Final Expense:</span>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                  (analysis as any).final_expense.qualifier_verdict === 'qualified' ? 'bg-emerald-100 text-emerald-800'
+                  : (analysis as any).final_expense.qualifier_verdict === 'borderline' ? 'bg-amber-100 text-amber-800'
+                  : (analysis as any).final_expense.qualifier_verdict === 'compliance_risk' ? 'bg-red-200 text-red-900'
+                  : 'bg-red-100 text-red-800'
+                }`}>
+                  {(analysis as any).final_expense.qualifier_verdict.replace('_', ' ')} · {(analysis as any).final_expense.qualifier_score}/100
+                </span>
+              </div>
+            )}
+
             {/* Coaching */}
             {analysis?.coaching_notes && (
               <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">

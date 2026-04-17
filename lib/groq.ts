@@ -108,12 +108,13 @@ export function buildSpeakerLabeledTranscript(
   return lines.join('\n')
 }
 
-const ANALYSIS_PROMPT_TEMPLATE = `You analyze recorded phone calls for an affiliate marketing business. The business pays per inbound call and needs to know if callers are genuinely interested in the advertised product/service. Return a single JSON object.
+const ANALYSIS_PROMPT_TEMPLATE = `You analyze recorded inbound phone calls for a FINAL EXPENSE life insurance business. Callers respond to ads and are screened by agents. You must extract both general call quality AND final-expense-specific qualification data. Return a single JSON object.
 
 IMPORTANT RULES:
 1. Output ONLY valid JSON. No markdown, no code fences, no text before or after.
 2. Every field is required. Use null or empty array if unknown — never omit a field.
 3. Speakers are labeled "Speaker A" / "Speaker B" via pause detection (imperfect). Infer which is the agent from context.
+4. For final_expense fields, extract information ONLY from what is explicitly said in the transcript — do not assume.
 
 CALL METADATA:
 - Campaign: {campaign_name}
@@ -144,7 +145,7 @@ Return this exact JSON structure:
     "verdict": "<qualified | borderline | unqualified | invalid>",
     "is_genuine_inquiry": <true if caller genuinely wanted the product/service>,
     "intent_signals": ["<direct quotes or phrases showing genuine interest>"],
-    "red_flags": ["<phrases suggesting misled caller, wrong product, bot, or fraud — e.g. 'free government money', 'my friend told me I get free stuff', competitor names, confusion about what the ad was for>"],
+    "red_flags": ["<phrases suggesting misled caller, wrong product, bot, or fraud>"],
     "misalignment_reason": "<one sentence explaining why intent doesn't match, or null if it does match>"
   },
   "extracted_data": {
@@ -158,15 +159,38 @@ Return this exact JSON structure:
   },
   "flags": ["<flag>"],
   "flag_details": { "<flag>": "<one sentence>" },
-  "coaching_notes": "<1-2 sentence agent coaching tip, or null>"
+  "coaching_notes": "<1-2 sentence agent coaching tip, or null>",
+  "final_expense": {
+    "age_mentioned": <exact age the caller stated as a number, or null if never mentioned>,
+    "age_verdict": "<good if 40-80 | borderline if 81-85 | bad if 86+ | unknown if not mentioned>",
+    "interested_in_life_insurance": "<yes | no | unclear — based on their direct answer when asked>",
+    "insurance_interest_notes": "<exact quote of what they said about interest, or null>",
+    "has_bank_account": "<yes | no | unclear — did they confirm having a bank account, credit union, or credit card>",
+    "can_afford": "<yes | concerns | no | unclear — yes if they confirmed ability to pay; concerns if they mentioned fixed income, tight budget, or hesitation; no if they explicitly said they cannot afford it>",
+    "affordability_notes": "<exact quote about affordability/income concerns, or null>",
+    "free_government_mentions": <true if anyone on the call mentioned 'free', 'government', 'government program', 'free benefits', 'government benefits', or similar>,
+    "free_government_quotes": ["<exact quotes where free or government was mentioned>"],
+    "outbound_call_claimed": <true if the caller said they were called, called back, or received an outbound call — we are INBOUND ONLY so this is a compliance red flag>,
+    "outbound_call_quote": "<exact quote where caller claimed they were called, or null>",
+    "ftc_regulatory_mention": <true if anyone mentioned FTC, filing a complaint, reporting to a regulatory body, BBB, attorney general, or similar>,
+    "ftc_quote": "<exact quote, or null>",
+    "scam_keywords_mentioned": <true if anyone used words like scam, fraud, fake, rip off, con, deceived, tricked, lied>,
+    "scam_quotes": ["<exact quotes containing scam-related words>"],
+    "misleading_ad_mention": <true if the caller mentioned the ad was misleading, false advertising, the ad said something different, or they were misled by the advertisement>,
+    "misleading_quotes": ["<exact quotes about misleading ads>"],
+    "qualifier_score": <0-100. Start at 100. Deduct: age 86+ (-20), age unknown (-10), age 81-85 (-5), no insurance interest (-15), no bank account (-15), affordability concerns (-10), cannot afford (-20), free/govt mention (-30), outbound call claimed (-25), FTC/regulatory mention (-40), scam keywords (-35), misleading ad mention (-30). Minimum 0.>,
+    "qualifier_verdict": "<qualified if score>=70 and no compliance flags | borderline if score 40-69 and no compliance flags | compliance_risk if ANY of free_government_mentions OR outbound_call_claimed OR ftc_regulatory_mention OR scam_keywords_mentioned OR misleading_ad_mention is true | disqualified if score<40>",
+    "qualifier_summary": "<1-2 sentences summarizing qualification status and the most important finding>"
+  }
 }
 
 Valid flags: agent_unprofessional, agent_script_deviation, caller_confused, caller_hostile, compliance_concern, dead_air_excessive, premature_hangup, language_mismatch, audio_quality_poor, insufficient_audio, duplicate_caller_suspected
 
 Scoring:
 - quality_score: professionalism 30%, engagement 20%, qualification 30%, outcome clarity 20%
+- Any compliance flag (free/govt, outbound claim, FTC, scam, misleading ad) should also trigger the "compliance_concern" flag and significantly lower quality_score
 - lead_intent.score: 100 = caller clearly wanted exactly what was advertised; 0 = completely wrong product, bot, or fraud
-- If transcript too short (<5 exchanges): quality_score 0, call_outcome "unclear", flags ["insufficient_audio"], lead_intent.verdict "invalid"
+- If transcript too short (<5 exchanges): quality_score 0, call_outcome "unclear", flags ["insufficient_audio"], lead_intent.verdict "invalid", all final_expense fields set to unknown/null/false/[]
 
 Return the JSON now.`
 

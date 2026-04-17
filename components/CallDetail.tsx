@@ -6,6 +6,7 @@ import { Call } from '@/types/database'
 import { Analysis } from '@/types/analysis'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { TranscriptViewer } from '@/components/TranscriptViewer'
+import { FinalExpenseCard } from '@/components/FinalExpenseCard'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
@@ -285,6 +286,13 @@ export function CallDetail({ call, audioUrl }: Props) {
 
         {/* ── RIGHT: Analysis sidebar ── */}
         <div className="lg:col-span-2 space-y-4">
+
+          {/* Final Expense Qualifier */}
+          {analysis?.final_expense && (
+            <Section title="Final Expense Qualifier">
+              <FinalExpenseCard data={analysis.final_expense} />
+            </Section>
+          )}
 
           {/* Summary */}
           {analysis ? (
