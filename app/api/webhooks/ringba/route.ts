@@ -52,6 +52,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, duplicate: true, call_id: existing.id })
   }
 
+  // Duplicate detection: same inbound caller_id seen before (within 30 days)
+  let is_duplicate = false
+  if (parsed.caller_id) {
+    const windowStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const { data: priorCall } = await supabase
+      .from('calls')
+      .select('id')
+      .eq('caller_id', parsed.caller_id)
+      .gte('received_at', windowStart)
+      .limit(1)
+      .maybeSingle()
+    if (priorCall) is_duplicate = true
+  }
+
   // Insert call row
   const { data: call, error: insertError } = await supabase
     .from('calls')
@@ -68,7 +82,7 @@ export async function POST(request: NextRequest) {
       target_id: parsed.target_id,
       target_name: parsed.target_name,
       end_call_source: parsed.end_call_source,
-      is_duplicate: parsed.is_duplicate,
+      is_duplicate,
       revenue: parsed.revenue,
       payout: parsed.payout,
       recording_url_original: parsed.recording_url_original,
