@@ -9,10 +9,15 @@ jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-      - name: Hit worker endpoint
+      - name: Hit worker endpoint (3 passes — download → transcribe → analyze)
         run: |
-          curl -sS -X POST "${{ secrets.APP_URL }}/api/jobs/process" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json" \
-            --max-time 60 \
-            --fail-with-body
+          for pass in 1 2 3; do
+            echo "--- Pass $pass ---"
+            curl -sS -X POST "${{ secrets.APP_URL }}/api/jobs/process" \
+              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+              -H "Content-Type: application/json" \
+              --max-time 120 \
+              --fail-with-body
+            echo ""
+            sleep 3
+          done
