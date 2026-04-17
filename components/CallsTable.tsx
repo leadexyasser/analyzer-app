@@ -418,7 +418,13 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                     {analysis.lead_intent.score}
                   </span>
                 </div>
-                <IntentBadge verdict={analysis.lead_intent.verdict} />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <IntentBadge verdict={analysis.lead_intent.verdict} />
+                  {analysis.call_outcome === 'sale_closed'
+                    ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: '#071a10', color: '#12b76a', border: '1px solid #0d3321' }}>✓ Sale Closed</span>
+                    : <span className="text-[10px] px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-surface)', color: 'var(--rb-text-3)', border: '1px solid var(--rb-border)' }}>Not closed</span>
+                  }
+                </div>
                 {analysis.lead_intent.misalignment_reason && (
                   <p className="text-xs italic" style={{ color: 'var(--rb-amber)' }}>{analysis.lead_intent.misalignment_reason}</p>
                 )}

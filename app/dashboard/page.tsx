@@ -33,7 +33,7 @@ async function getStats(start: Date, end: Date) {
   const [todayRes, revenueRes, analysisRes, todayCallsRes, allRes] = await Promise.all([
     supabase.from('calls').select('id', { count: 'exact', head: true }).gte('received_at', todayStart.toISOString()),
     supabase.from('calls').select('revenue').gte('received_at', start.toISOString()).lte('received_at', end.toISOString()).eq('status', 'complete').not('revenue', 'is', null),
-    supabase.from('calls').select('analysis').gte('received_at', start.toISOString()).lte('received_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null),
+    supabase.from('calls').select('analysis, target_name, revenue').gte('received_at', start.toISOString()).lte('received_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null),
     supabase.from('calls').select('received_at').gte('received_at', todayStart.toISOString()),
     supabase.from('calls').select('campaign_name,publisher_name,status,revenue,payout,is_duplicate,quality_score').gte('received_at', start.toISOString()).lte('received_at', end.toISOString()),
   ])
@@ -44,27 +44,53 @@ async function getStats(start: Date, end: Date) {
   const feScores: number[] = []
   let complianceTotal = 0, complianceClean = 0
   const complianceFlagCounts: Record<string, number> = {}
+  let closedCount = 0
+  const totalAnalyzed = (analysisRes.data ?? []).length
+
+  type TRow = { name: string; incoming: number; closed: number; revenue: number }
+  const targetMap = new Map<string, TRow>()
 
   for (const row of analysisRes.data ?? []) {
-    const fe = (row.analysis as any)?.final_expense
-    if (!fe) continue
-    const score = computeFELeadQuality(fe)
-    if (score !== null) feScores.push(score)
-    complianceTotal++
-    if (hasComplianceIssue(fe)) {
-      for (const key of Object.keys(COMPLIANCE_FLAG_LABELS)) {
-        if (fe[key]) complianceFlagCounts[key] = (complianceFlagCounts[key] ?? 0) + 1
+    const analysis = row.analysis as any
+    const fe = analysis?.final_expense
+    const isClosed = analysis?.call_outcome === 'sale_closed'
+    const target = (row as any).target_name ?? '—'
+    const rev = (row as any).revenue != null ? Number((row as any).revenue) : 0
+
+    if (fe) {
+      const score = computeFELeadQuality(fe)
+      if (score !== null) feScores.push(score)
+      complianceTotal++
+      if (hasComplianceIssue(fe)) {
+        for (const key of Object.keys(COMPLIANCE_FLAG_LABELS)) {
+          if (fe[key]) complianceFlagCounts[key] = (complianceFlagCounts[key] ?? 0) + 1
+        }
+      } else {
+        complianceClean++
       }
-    } else {
-      complianceClean++
     }
+
+    if (isClosed) closedCount++
+
+    if (!targetMap.has(target)) targetMap.set(target, { name: target, incoming: 0, closed: 0, revenue: 0 })
+    const t = targetMap.get(target)!
+    t.incoming++
+    t.revenue += rev
+    if (isClosed) t.closed++
   }
 
   const avgFEQuality = feScores.length ? Math.round(feScores.reduce((a, b) => a + b, 0) / feScores.length) : null
   const complianceScore = complianceTotal > 0 ? Math.round((complianceClean / complianceTotal) * 100) : null
+  const closedRate = totalAnalyzed > 0 ? Math.round((closedCount / totalAnalyzed) * 100) : null
+  const overallCPA = closedCount > 0 ? revenue / closedCount : null
+
   const topFlags = Object.entries(complianceFlagCounts)
     .sort((a, b) => b[1] - a[1]).slice(0, 3)
     .map(([key, count]) => [COMPLIANCE_FLAG_LABELS[key] ?? key, count] as [string, number])
+
+  const byTarget = [...targetMap.values()]
+    .map(t => ({ ...t, cpa: t.closed > 0 ? t.revenue / t.closed : null }))
+    .sort((a, b) => b.incoming - a.incoming)
 
   const hourly = Array(24).fill(0)
   for (const row of todayCallsRes.data ?? []) {
@@ -93,20 +119,23 @@ async function getStats(start: Date, end: Date) {
   }
 
   return {
-    callsToday, revenue, avgFEQuality, complianceScore, complianceTotal, topFlags,
-    hourly,
+    callsToday, revenue, avgFEQuality, complianceScore, complianceTotal,
+    closedRate, closedCount, overallCPA, topFlags,
+    hourly, byTarget,
     byCampaign:  [...campaignMap.values()].sort((a, b) => b.incoming - a.incoming),
     byPublisher: [...publisherMap.values()].sort((a, b) => b.incoming - a.incoming),
   }
 }
 
-function StatCard({ label, value, sub, accent = false, warn = false }: {
-  label: string; value: string; sub?: string; accent?: boolean; warn?: boolean
+function StatCard({ label, value, sub, accent = false, warn = false, green = false }: {
+  label: string; value: string; sub?: string; accent?: boolean; warn?: boolean; green?: boolean
 }) {
   return (
     <div className="rounded-xl px-5 py-4 space-y-1" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
       <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>{label}</p>
-      <p className="text-2xl font-bold tabular-nums" style={{ color: accent ? 'var(--rb-accent)' : warn ? 'var(--rb-amber)' : 'var(--rb-text)' }}>
+      <p className="text-2xl font-bold tabular-nums" style={{
+        color: accent ? 'var(--rb-accent)' : green ? 'var(--rb-green)' : warn ? 'var(--rb-amber)' : 'var(--rb-text)'
+      }}>
         {value}
       </p>
       {sub && <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>{sub}</p>}
@@ -142,20 +171,32 @@ export default async function DashboardPage({
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
         <StatCard label="Calls Today" value={String(stats.callsToday)} />
         <StatCard label={`Revenue (${label})`} value={`$${stats.revenue.toFixed(0)}`} accent />
         <StatCard
-          label={`FE Lead Quality (${label})`}
+          label="FE Lead Quality"
           value={stats.avgFEQuality != null ? `${stats.avgFEQuality}%` : '—'}
           sub="avg weighted score"
         />
         <StatCard
-          label={`Compliance Score (${label})`}
+          label="Compliance Score"
           value={stats.complianceScore != null ? `${stats.complianceScore}%` : '—'}
-          sub={stats.complianceTotal > 0 ? `${stats.complianceTotal} analyzed calls` : undefined}
+          sub={stats.complianceTotal > 0 ? `${stats.complianceTotal} analyzed` : undefined}
           accent={stats.complianceScore != null && stats.complianceScore >= 90}
           warn={stats.complianceScore != null && stats.complianceScore < 80}
+        />
+        <StatCard
+          label="Closed Rate"
+          value={stats.closedRate != null ? `${stats.closedRate}%` : '—'}
+          sub={stats.closedCount > 0 ? `${stats.closedCount} sale${stats.closedCount !== 1 ? 's' : ''} closed` : 'no sales yet'}
+          green={stats.closedRate != null && stats.closedRate > 0}
+        />
+        <StatCard
+          label="Overall CPA"
+          value={stats.overallCPA != null ? `$${stats.overallCPA.toFixed(0)}` : '—'}
+          sub="total revenue ÷ closed"
+          accent={stats.overallCPA != null}
         />
         <div className="rounded-xl px-5 py-4" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
           <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--rb-text-3)' }}>Compliance Flags</p>
@@ -177,7 +218,7 @@ export default async function DashboardPage({
       <Timeline hourly={stats.hourly} />
 
       {/* Summary breakdown */}
-      <SummaryTable byCampaign={stats.byCampaign} byPublisher={stats.byPublisher} />
+      <SummaryTable byCampaign={stats.byCampaign} byPublisher={stats.byPublisher} byTarget={stats.byTarget} />
 
       {/* Call log */}
       <CallsTable />
