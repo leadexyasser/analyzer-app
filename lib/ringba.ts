@@ -141,7 +141,7 @@ export function parseRingbaPayload(raw: unknown): {
     target_number: parsed.dialed_number ?? parsed.target_number ?? parsed.dnis ?? parsed.to ?? null,
     campaign_name: parsed.campaign_name ?? parsed.campaign ?? null,
     campaign_id: parsed.campaign_id ?? null,
-    buyer_name: parsed.buyer_name ?? parsed.buyer ?? null,
+    buyer_name: parsed.buyer_name ?? parsed.buyer ?? parsed.target_name ?? null,
     publisher_name: parsed.publisher_name ?? parsed.publisher ?? parsed.affiliate_name ?? null,
     target_id: parsed.target_id ?? null,
     target_name: parsed.target_name ?? null,
