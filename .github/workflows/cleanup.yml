@@ -1,0 +1,18 @@
+name: Cleanup old audio files
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit cleanup endpoint
+        run: |
+          curl -sS -X POST "${{ secrets.APP_URL }}/api/jobs/cleanup" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            --max-time 60 \
+            --fail-with-body
