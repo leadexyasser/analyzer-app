@@ -7,6 +7,7 @@ import { RetryStuckButton } from '@/components/RetryStuckButton'
 import { Timeline } from '@/components/Timeline'
 import { SummaryTable } from '@/components/SummaryTable'
 import { DateRangeControl } from '@/components/DateRangeControl'
+import { AutoRefresh } from '@/components/AutoRefresh'
 import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from '@/lib/fe-scoring'
 import { Suspense } from 'react'
 
@@ -169,6 +170,7 @@ export default async function DashboardPage({
           <Suspense>
             <DateRangeControl />
           </Suspense>
+          <AutoRefresh />
           <RetryStuckButton />
         </div>
       </div>
