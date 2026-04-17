@@ -314,13 +314,13 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                     />
                   </div>
                   <span
-                    className="text-base font-bold tabular-nums w-10 text-right"
+                    className="text-base font-bold tabular-nums w-12 text-right"
                     style={{ color: feLeadQuality >= 70 ? 'var(--rb-green)' : feLeadQuality >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)' }}
                   >
-                    {feLeadQuality}
+                    {feLeadQuality}%
                   </span>
                 </div>
-                <p className="text-[10px]" style={{ color: 'var(--rb-text-3)' }}>weighted qualifier score / 100</p>
+                <p className="text-[10px]" style={{ color: 'var(--rb-text-3)' }}>weighted qualifier score</p>
               </div>
             )}
 

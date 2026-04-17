@@ -127,8 +127,8 @@ export default async function DashboardPage() {
         <StatCard label="Revenue (7d)" value={`$${stats.weekRevenue.toFixed(0)}`} accent />
         <StatCard
           label="FE Lead Quality (7d)"
-          value={stats.avgFEQuality != null ? `${stats.avgFEQuality}` : '—'}
-          sub="avg weighted score / 100"
+          value={stats.avgFEQuality != null ? `${stats.avgFEQuality}%` : '—'}
+          sub="avg weighted score"
         />
         <StatCard
           label="Compliance Score (7d)"
