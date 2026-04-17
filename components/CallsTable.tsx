@@ -650,7 +650,7 @@ export function CallsTable() {
     </th>
   )
 
-  const COLS = ['Date', 'Source', 'Campaign', 'Caller ID', 'Dialed #', 'Dup', 'End Source', 'Target', 'Revenue', 'Payout', 'Duration', 'Quality', 'FE Qualifier', 'Status']
+  const COLS = ['Date', 'Source', 'Campaign', 'Caller ID', 'Dialed #', 'Dup', 'End Source', 'Target', 'Revenue', 'Payout', 'Duration', 'Quality', 'FE Qualifier', 'Closed', 'Status']
 
   return (
     <div className="space-y-3">
@@ -830,6 +830,16 @@ export function CallsTable() {
                               <span className="opacity-70">· {fe.qualifier_score}</span>
                             </span>
                           )
+                        })()}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {(() => {
+                          const outcome = (call.analysis as any)?.call_outcome
+                          if (!outcome) return <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
+                          if (outcome === 'sale_closed') {
+                            return <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: '#071a10', color: '#12b76a', border: '1px solid #0d3321' }}>✓ Closed</span>
+                          }
+                          return <span className="text-[10px] px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-3)', border: '1px solid var(--rb-border)' }}>No</span>
                         })()}
                       </td>
                       <td className="px-3 py-3">
