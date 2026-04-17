@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { parseRingbaPayload, verifySignature } from '@/lib/ringba'
 import { enqueueJob } from '@/lib/queue'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text()
@@ -85,6 +86,27 @@ export async function POST(request: NextRequest) {
   // Enqueue download job if there's a recording URL
   if (parsed.recording_url_original) {
     await enqueueJob(call.id, 'download')
+
+    // Immediately kick off processing in the background — don't wait for cron.
+    // after() runs after the 200 is sent to Ringba; 3 passes chain download→transcribe→analyze.
+    after(async () => {
+      const host =
+        process.env.NEXT_PUBLIC_APP_URL ??
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL
+          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+          : null)
+      if (!host || !process.env.CRON_SECRET) return
+      const headers = {
+        Authorization: `Bearer ${process.env.CRON_SECRET}`,
+        'Content-Type': 'application/json',
+      }
+      for (let i = 0; i < 3; i++) {
+        try {
+          await fetch(`${host}/api/jobs/process`, { method: 'POST', headers })
+        } catch {}
+        if (i < 2) await new Promise(r => setTimeout(r, 2000))
+      }
+    })
   } else {
     // No recording — mark as failed with a clear message
     await supabase
