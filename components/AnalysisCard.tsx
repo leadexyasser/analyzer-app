@@ -151,6 +151,58 @@ export function AnalysisCard({ analysis }: Props) {
         </CardContent>
       </Card>
 
+      {/* Lead Intent */}
+      {analysis.lead_intent && (
+        <Card className={analysis.lead_intent.verdict === 'qualified' ? 'border-emerald-200' : analysis.lead_intent.verdict === 'invalid' || analysis.lead_intent.verdict === 'unqualified' ? 'border-red-200' : 'border-amber-200'}>
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center justify-between">
+              Lead Intent Match
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                analysis.lead_intent.verdict === 'qualified' ? 'bg-emerald-100 text-emerald-800'
+                : analysis.lead_intent.verdict === 'borderline' ? 'bg-amber-100 text-amber-800'
+                : 'bg-red-100 text-red-800'
+              }`}>
+                {analysis.lead_intent.verdict} · {analysis.lead_intent.score}/100
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <ScoreMeter score={analysis.lead_intent.score} />
+            <div className="flex items-center gap-2 text-sm">
+              <span className={analysis.lead_intent.is_genuine_inquiry ? 'text-emerald-700' : 'text-red-600'}>
+                {analysis.lead_intent.is_genuine_inquiry ? '✓ Genuine inquiry' : '✗ Not a genuine inquiry'}
+              </span>
+            </div>
+            {analysis.lead_intent.misalignment_reason && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <p className="text-xs font-medium text-amber-700 mb-0.5">Misalignment</p>
+                <p className="text-sm text-amber-800">{analysis.lead_intent.misalignment_reason}</p>
+              </div>
+            )}
+            {analysis.lead_intent.intent_signals.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Intent Signals</p>
+                <ul className="space-y-0.5">
+                  {analysis.lead_intent.intent_signals.map((s, i) => (
+                    <li key={i} className="text-sm text-emerald-700 flex gap-2"><span>+</span><span>"{s}"</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {analysis.lead_intent.red_flags.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Red Flags</p>
+                <ul className="space-y-0.5">
+                  {analysis.lead_intent.red_flags.map((r, i) => (
+                    <li key={i} className="text-sm text-red-600 flex gap-2"><span>!</span><span>"{r}"</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Coaching Notes */}
       {analysis.coaching_notes && (
         <Card className="border-blue-200 bg-blue-50">

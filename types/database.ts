@@ -20,10 +20,16 @@ export interface Call {
   caller_id: string | null
   target_number: string | null
   campaign_name: string | null
+  campaign_id: string | null
   buyer_name: string | null
   publisher_name: string | null
+  target_id: string | null
+  target_name: string | null
+  end_call_source: string | null
+  is_duplicate: boolean | null
   revenue: number | null
   payout: number | null
+  metadata: Json | null
   recording_url_original: string | null
   recording_storage_path: string | null
   transcript: Json | null

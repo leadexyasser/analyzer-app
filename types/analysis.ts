@@ -17,6 +17,15 @@ export const ExtractedDataSchema = z.object({
   callback_requested: z.boolean(),
 })
 
+export const LeadIntentSchema = z.object({
+  score: z.number().int().min(0).max(100),
+  verdict: z.enum(['qualified', 'borderline', 'unqualified', 'invalid']),
+  is_genuine_inquiry: z.boolean(),
+  intent_signals: z.array(z.string()),
+  red_flags: z.array(z.string()),
+  misalignment_reason: z.string().nullable(),
+})
+
 export const ValidFlags = [
   'agent_unprofessional',
   'agent_script_deviation',
@@ -53,6 +62,7 @@ export const AnalysisSchema = z.object({
   quality_breakdown: QualityBreakdownSchema,
   call_outcome: CallOutcomeEnum,
   outcome_confidence: z.enum(['high', 'medium', 'low']),
+  lead_intent: LeadIntentSchema,
   extracted_data: ExtractedDataSchema,
   flags: z.array(z.string()),
   flag_details: z.record(z.string(), z.string()),
@@ -63,3 +73,4 @@ export type Analysis = z.infer<typeof AnalysisSchema>
 export type CallOutcome = z.infer<typeof CallOutcomeEnum>
 export type QualityBreakdown = z.infer<typeof QualityBreakdownSchema>
 export type ExtractedData = z.infer<typeof ExtractedDataSchema>
+export type LeadIntent = z.infer<typeof LeadIntentSchema>

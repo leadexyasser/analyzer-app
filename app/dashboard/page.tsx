@@ -1,128 +1,90 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { CallList } from '@/components/CallList'
+import { CallsTable } from '@/components/CallsTable'
 
 async function getStats() {
   const supabase = createServiceClient()
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
+  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-  const weekStart = new Date()
-  weekStart.setDate(weekStart.getDate() - 7)
-
-  const [callsTodayRes, avgQualityRes, topFlagsRes, groqUsageRes] = await Promise.all([
-    supabase
-      .from('calls')
-      .select('id', { count: 'exact', head: true })
-      .gte('received_at', todayStart.toISOString()),
-
-    supabase
-      .from('calls')
-      .select('quality_score')
-      .eq('status', 'complete')
-      .gte('received_at', weekStart.toISOString())
-      .not('quality_score', 'is', null),
-
-    supabase
-      .from('calls')
-      .select('flags')
-      .eq('status', 'complete')
-      .gte('received_at', weekStart.toISOString())
-      .not('flags', 'is', null),
-
-    supabase
-      .from('api_logs')
-      .select('id', { count: 'exact', head: true })
-      .gte('created_at', todayStart.toISOString()),
+  const [todayRes, weekRevenueRes, weekQualityRes, weekFlagsRes, outcomesRes, duplicatesRes] = await Promise.all([
+    supabase.from('calls').select('id', { count: 'exact', head: true }).gte('received_at', todayStart.toISOString()),
+    supabase.from('calls').select('revenue').gte('received_at', weekStart.toISOString()).eq('status', 'complete').not('revenue', 'is', null),
+    supabase.from('calls').select('quality_score').gte('received_at', weekStart.toISOString()).eq('status', 'complete').not('quality_score', 'is', null),
+    supabase.from('calls').select('flags').gte('received_at', weekStart.toISOString()).eq('status', 'complete'),
+    supabase.from('calls').select('analysis').gte('received_at', weekStart.toISOString()).eq('status', 'complete').not('analysis', 'is', null),
+    supabase.from('calls').select('id', { count: 'exact', head: true }).gte('received_at', weekStart.toISOString()).eq('is_duplicate', true),
   ])
 
-  const callsToday = callsTodayRes.count ?? 0
-  const groqRequests = groqUsageRes.count ?? 0
+  const callsToday = todayRes.count ?? 0
+  const weekRevenue = (weekRevenueRes.data ?? []).reduce((s: number, r: any) => s + Number(r.revenue ?? 0), 0)
+  const scores = (weekQualityRes.data ?? []).map((r: any) => r.quality_score as number)
+  const avgQuality = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null
+  const duplicates = duplicatesRes.count ?? 0
 
-  const scores = (avgQualityRes.data?.map((r) => r.quality_score).filter((s): s is number => s != null)) ?? []
-  const avgQuality = scores.length ? Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length) : null
-
-  // Count flag frequency this week
   const flagCounts: Record<string, number> = {}
-  for (const row of topFlagsRes.data ?? []) {
-    for (const flag of row.flags ?? []) {
+  for (const row of weekFlagsRes.data ?? []) {
+    for (const flag of (row.flags as string[] | null) ?? []) {
       flagCounts[flag] = (flagCounts[flag] ?? 0) + 1
     }
   }
-  const topFlags = Object.entries(flagCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([flag, count]) => ({ flag, count }))
+  const topFlags = Object.entries(flagCounts).sort((a, b) => b[1] - a[1]).slice(0, 3)
 
-  return { callsToday, avgQuality, topFlags, groqRequests }
+  const outcomeCounts: Record<string, number> = {}
+  for (const row of outcomesRes.data ?? []) {
+    const outcome = (row.analysis as any)?.call_outcome
+    if (outcome) outcomeCounts[outcome] = (outcomeCounts[outcome] ?? 0) + 1
+  }
+
+  return { callsToday, weekRevenue, avgQuality, duplicates, topFlags, outcomeCounts, totalWeekCalls: scores.length }
 }
 
 export default async function DashboardPage() {
   const stats = await getStats()
 
+  const qualityColor = stats.avgQuality == null ? 'text-slate-400' :
+    stats.avgQuality >= 70 ? 'text-emerald-600' :
+    stats.avgQuality >= 40 ? 'text-amber-600' : 'text-red-600'
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">Real-time call analysis overview</p>
+      {/* Stats row */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Calls Today</p>
+          <p className="text-3xl font-bold text-slate-900 mt-1">{stats.callsToday}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Revenue (7d)</p>
+          <p className="text-3xl font-bold text-emerald-600 mt-1">${stats.weekRevenue.toFixed(0)}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Avg Quality (7d)</p>
+          <p className={`text-3xl font-bold mt-1 ${qualityColor}`}>{stats.avgQuality ?? '—'}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Duplicates (7d)</p>
+          <p className="text-3xl font-bold text-slate-900 mt-1">{stats.duplicates}</p>
+          {stats.totalWeekCalls > 0 && (
+            <p className="text-xs text-slate-400 mt-0.5">{((stats.duplicates / stats.totalWeekCalls) * 100).toFixed(1)}% rate</p>
+          )}
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Top Flags (7d)</p>
+          {stats.topFlags.length === 0 ? <p className="text-sm text-slate-400 mt-1">None</p> : (
+            <ul className="mt-1 space-y-0.5">
+              {stats.topFlags.map(([flag, count]) => (
+                <li key={flag} className="flex justify-between text-xs">
+                  <span className="text-slate-600 truncate">{flag.replace(/_/g, ' ')}</span>
+                  <span className="font-semibold text-slate-900 ml-2">{count}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Calls Today</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{stats.callsToday}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Avg Quality (7d)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">
-              {stats.avgQuality != null ? (
-                <span className={stats.avgQuality >= 70 ? 'text-green-600' : stats.avgQuality >= 40 ? 'text-yellow-600' : 'text-red-600'}>
-                  {stats.avgQuality}
-                </span>
-              ) : '—'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Top Flags (7d)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {stats.topFlags.length === 0 ? (
-              <p className="text-sm text-muted-foreground">None</p>
-            ) : (
-              <ul className="space-y-1">
-                {stats.topFlags.map(({ flag, count }) => (
-                  <li key={flag} className="text-xs flex justify-between">
-                    <span className="truncate">{flag.replace(/_/g, ' ')}</span>
-                    <span className="font-medium ml-2">{count}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Groq Requests Today</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{stats.groqRequests}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <CallList />
+      <CallsTable />
     </div>
   )
 }

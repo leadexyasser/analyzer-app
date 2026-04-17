@@ -108,70 +108,67 @@ export function buildSpeakerLabeledTranscript(
   return lines.join('\n')
 }
 
-const ANALYSIS_PROMPT_TEMPLATE = `You analyze recorded phone calls between a call center agent and an inbound caller from paid advertising campaigns. Return a single JSON object evaluating the call.
+const ANALYSIS_PROMPT_TEMPLATE = `You analyze recorded phone calls for an affiliate marketing business. The business pays per inbound call and needs to know if callers are genuinely interested in the advertised product/service. Return a single JSON object.
 
 IMPORTANT RULES:
 1. Output ONLY valid JSON. No markdown, no code fences, no text before or after.
-2. Every field in the schema is required. If unknown, use null or empty array, never omit.
-3. Note: speakers are labeled "Speaker A" / "Speaker B" based on pause detection, which is imperfect. Infer which is the agent from context (agents introduce themselves, ask qualifying questions, follow scripts).
+2. Every field is required. Use null or empty array if unknown — never omit a field.
+3. Speakers are labeled "Speaker A" / "Speaker B" via pause detection (imperfect). Infer which is the agent from context.
 
 CALL METADATA:
 - Campaign: {campaign_name}
-- Buyer: {buyer_name}
+- Buyer/Target: {buyer_name}
 - Duration: {duration_seconds} seconds
 - Revenue: ${'{revenue}'}
 
 TRANSCRIPT:
 {transcript_text}
 
-Return a JSON object with this exact structure:
+Return this exact JSON structure:
 
 {
-  "summary": "<2-3 sentences describing what happened>",
-  "language": "<one of: en, es, mixed, other>",
-  "agent_speaker": "<one of: Speaker A, Speaker B, unclear>",
-  "quality_score": <integer 0-100>,
+  "summary": "<2-3 sentences: what happened, caller need, outcome>",
+  "language": "<en | es | mixed | other>",
+  "agent_speaker": "<Speaker A | Speaker B | unclear>",
+  "quality_score": <0-100>,
   "quality_breakdown": {
-    "agent_professionalism": <integer 0-10>,
-    "caller_engagement": <integer 0-10>,
-    "qualification_completeness": <integer 0-10>,
-    "call_outcome_clarity": <integer 0-10>
+    "agent_professionalism": <0-10>,
+    "caller_engagement": <0-10>,
+    "qualification_completeness": <0-10>,
+    "call_outcome_clarity": <0-10>
   },
-  "call_outcome": "<one of: transferred, qualified_no_transfer, not_qualified, hung_up_early, voicemail, wrong_number, callback_scheduled, sale_closed, unclear>",
-  "outcome_confidence": "<one of: high, medium, low>",
+  "call_outcome": "<transferred | qualified_no_transfer | not_qualified | hung_up_early | voicemail | wrong_number | callback_scheduled | sale_closed | unclear>",
+  "outcome_confidence": "<high | medium | low>",
+  "lead_intent": {
+    "score": <0-100, how well caller intent matches the campaign offer>,
+    "verdict": "<qualified | borderline | unqualified | invalid>",
+    "is_genuine_inquiry": <true if caller genuinely wanted the product/service>,
+    "intent_signals": ["<direct quotes or phrases showing genuine interest>"],
+    "red_flags": ["<phrases suggesting misled caller, wrong product, bot, or fraud — e.g. 'free government money', 'my friend told me I get free stuff', competitor names, confusion about what the ad was for>"],
+    "misalignment_reason": "<one sentence explaining why intent doesn't match, or null if it does match>"
+  },
   "extracted_data": {
     "caller_stated_name": "<string or null>",
     "caller_location_state": "<string or null>",
     "intent_or_need": "<string or null>",
-    "objections_raised": ["<string>", ...],
-    "commitments_made": ["<string>", ...],
+    "objections_raised": ["<string>"],
+    "commitments_made": ["<string>"],
     "payment_info_collected": <boolean>,
     "callback_requested": <boolean>
   },
-  "flags": ["<snake_case_flag>", ...],
-  "flag_details": { "<flag_name>": "<one sentence explanation>" },
-  "coaching_notes": "<1-2 sentence suggestion for the agent, or null>"
+  "flags": ["<flag>"],
+  "flag_details": { "<flag>": "<one sentence>" },
+  "coaching_notes": "<1-2 sentence agent coaching tip, or null>"
 }
 
-Valid flag values (use only these):
-- agent_unprofessional
-- agent_script_deviation
-- caller_confused
-- caller_hostile
-- compliance_concern
-- dead_air_excessive
-- premature_hangup
-- language_mismatch
-- audio_quality_poor
-- insufficient_audio
-- duplicate_caller_suspected
+Valid flags: agent_unprofessional, agent_script_deviation, caller_confused, caller_hostile, compliance_concern, dead_air_excessive, premature_hangup, language_mismatch, audio_quality_poor, insufficient_audio, duplicate_caller_suspected
 
-Scoring guidance:
-- quality_score weights: professionalism 30%, engagement 20%, qualification 30%, outcome clarity 20%
-- If transcript is empty or too short to analyze (<5 exchanges), return quality_score: 0, call_outcome: "unclear", flags: ["insufficient_audio"]
-- Be strict on compliance flags — flag anything concerning for human review.
+Scoring:
+- quality_score: professionalism 30%, engagement 20%, qualification 30%, outcome clarity 20%
+- lead_intent.score: 100 = caller clearly wanted exactly what was advertised; 0 = completely wrong product, bot, or fraud
+- If transcript too short (<5 exchanges): quality_score 0, call_outcome "unclear", flags ["insufficient_audio"], lead_intent.verdict "invalid"
 
-Return the JSON object now.`
+Return the JSON now.`
 
 export async function analyzeCall(params: {
   callId: string
