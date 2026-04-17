@@ -18,6 +18,13 @@ export async function enqueueJob(callId: string, jobType: JobType) {
 export async function dequeueJobs(limit = 3) {
   const supabase = createServiceClient()
   const now = new Date().toISOString()
+  // Jobs stuck in 'running' for >3 min timed out — reset them so they retry
+  const staleThreshold = new Date(Date.now() - 3 * 60_000).toISOString()
+  await supabase
+    .from('processing_jobs')
+    .update({ status: 'queued', scheduled_for: now })
+    .eq('status', 'running')
+    .lt('updated_at', staleThreshold)
 
   const { data, error } = await supabase
     .from('processing_jobs')
