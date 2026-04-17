@@ -2,6 +2,31 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { toast } from 'sonner'
+
+function ReanalyzeButton({ callId }: { callId: string }) {
+  const [loading, setLoading] = useState(false)
+  const handleClick = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/calls/${callId}/reanalyze`, { method: 'POST' })
+      if (res.ok) toast.success('Re-analysis started — refresh in ~60s')
+      else toast.error((await res.json()).error ?? 'Failed')
+    } catch { toast.error('Network error') }
+    finally { setLoading(false) }
+  }
+  return (
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      className="text-[10px] font-bold px-3 py-1.5 rounded-lg whitespace-nowrap disabled:opacity-50 transition-colors"
+      style={{ background: 'var(--rb-accent)', color: '#0d1117' }}
+    >
+      {loading ? 'Starting…' : 'Re-analyze now'}
+    </button>
+  )
+}
 import { Call } from '@/types/database'
 import { Analysis } from '@/types/analysis'
 import { ChevronDown, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
@@ -86,6 +111,73 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
         style={{ background: 'var(--rb-sidebar)', borderBottom: '1px solid var(--rb-border)' }}
       >
         <div className="px-6 py-5 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+          {/* Final Expense prominent block */}
+          <div className="lg:col-span-3">
+            {(() => {
+              const fe = (analysis as any)?.final_expense
+              if (!fe) {
+                return call.status === 'complete' ? (
+                  <div
+                    className="rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-4"
+                    style={{ background: '#1c1204', border: '1px solid #3d2a08' }}
+                  >
+                    <div>
+                      <p className="text-xs font-bold" style={{ color: '#f79009' }}>Final Expense Qualifier — Not analyzed yet</p>
+                      <p className="text-xs mt-0.5" style={{ color: '#7a5c2e' }}>
+                        This call was analyzed before the FE qualifier was added. Re-analyze to extract age, insurance interest, compliance flags, and more.
+                      </p>
+                    </div>
+                    <ReanalyzeButton callId={call.id!} />
+                  </div>
+                ) : null
+              }
+              const MAP: Record<string, [string, string, string]> = {
+                qualified:       ['#071a10', '#0d3321', '#12b76a'],
+                borderline:      ['#1c1204', '#3d2a08', '#f79009'],
+                disqualified:    ['#1c0808', '#3d1212', '#f04438'],
+                compliance_risk: ['#200a0a', '#5c1414', '#f04438'],
+              }
+              const [bg, border, color] = MAP[fe.qualifier_verdict] ?? ['#141e2d', '#1e2d40', '#7a8fa6']
+              const hasComp = fe.free_government_mentions || fe.outbound_call_claimed || fe.ftc_regulatory_mention || fe.scam_keywords_mentioned || fe.misleading_ad_mention
+              const compFlags = [
+                fe.free_government_mentions && 'Free/Gov mention',
+                fe.outbound_call_claimed && 'Outbound call claimed',
+                fe.ftc_regulatory_mention && 'FTC/Regulatory',
+                fe.scam_keywords_mentioned && 'Scam keywords',
+                fe.misleading_ad_mention && 'Misleading ad',
+              ].filter(Boolean)
+              const qualFlags = [
+                fe.age_mentioned != null && `Age: ${fe.age_mentioned} (${fe.age_verdict})`,
+                fe.interested_in_life_insurance !== 'unclear' && `Insurance interest: ${fe.interested_in_life_insurance}`,
+                fe.has_bank_account !== 'unclear' && `Bank account: ${fe.has_bank_account}`,
+                fe.can_afford !== 'unclear' && `Affordability: ${fe.can_afford}`,
+              ].filter(Boolean)
+              return (
+                <div className="rounded-xl px-4 py-3 mb-4" style={{ background: bg, border: `1px solid ${border}` }}>
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg">{hasComp ? '⚠️' : fe.qualifier_verdict === 'qualified' ? '✅' : '🟡'}</span>
+                      <div>
+                        <p className="text-xs font-bold" style={{ color }}>
+                          Final Expense: {fe.qualifier_verdict.replace('_', ' ')} · {fe.qualifier_score}/100
+                        </p>
+                        <p className="text-xs mt-0.5" style={{ color: 'var(--rb-text-3)' }}>{fe.qualifier_summary}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 text-right">
+                      {qualFlags.map((f, i) => (
+                        <span key={i} className="text-[10px] px-2 py-0.5 rounded" style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}>{f as string}</span>
+                      ))}
+                      {compFlags.map((f, i) => (
+                        <span key={i} className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ background: '#200a0a', color: '#f04438', border: '1px solid #3d1212' }}>⚠ {f as string}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
 
           {/* Summary */}
           <div className="lg:col-span-2 space-y-4">
@@ -433,7 +525,7 @@ export function CallsTable() {
     </th>
   )
 
-  const COLS = ['Date', 'Source', 'Campaign', 'Caller ID', 'Dialed #', 'Dup', 'End Source', 'Target', 'Revenue', 'Payout', 'Duration', 'Quality', 'Status']
+  const COLS = ['Date', 'Source', 'Campaign', 'Caller ID', 'Dialed #', 'Dup', 'End Source', 'Target', 'Revenue', 'Payout', 'Duration', 'Quality', 'FE Qualifier', 'Status']
 
   return (
     <div className="space-y-3">
@@ -560,6 +652,32 @@ export function CallsTable() {
                           <QBadge score={call.quality_score ?? null} />
                           {leadVerdict && <IntentBadge verdict={leadVerdict} />}
                         </div>
+                      </td>
+                      {/* FE Qualifier */}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {(() => {
+                          const fe = (analysis as any)?.final_expense
+                          if (!fe) {
+                            return call.status === 'complete'
+                              ? <span className="text-[10px]" style={{ color: 'var(--rb-text-3)' }}>needs re-analysis</span>
+                              : <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
+                          }
+                          const MAP: Record<string, [string, string]> = {
+                            qualified:       ['#071a10', '#12b76a'],
+                            borderline:      ['#2e1f04', '#f79009'],
+                            disqualified:    ['#1c0808', '#f04438'],
+                            compliance_risk: ['#200a0a', '#f04438'],
+                          }
+                          const [bg, color] = MAP[fe.qualifier_verdict] ?? ['#1e2d40', '#7a8fa6']
+                          const hasComp = fe.free_government_mentions || fe.outbound_call_claimed || fe.ftc_regulatory_mention || fe.scam_keywords_mentioned || fe.misleading_ad_mention
+                          return (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: bg, color }}>
+                              {hasComp && '⚠ '}
+                              {fe.qualifier_verdict.replace('_', ' ')}
+                              <span className="opacity-70">· {fe.qualifier_score}</span>
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td className="px-3 py-3">
                         <StatusBadge status={call.status ?? 'pending'} />

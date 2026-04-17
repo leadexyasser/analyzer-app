@@ -9,6 +9,30 @@ import { FinalExpenseCard } from '@/components/FinalExpenseCard'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
+function ReanalyzeBtn({ callId }: { callId: string }) {
+  const [loading, setLoading] = useState(false)
+  const router = useRouter()
+  const handleClick = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/calls/${callId}/reanalyze`, { method: 'POST' })
+      if (res.ok) { toast.success('Re-analysis started — page will refresh'); setTimeout(() => router.refresh(), 5000) }
+      else toast.error((await res.json()).error ?? 'Failed')
+    } catch { toast.error('Network error') }
+    finally { setLoading(false) }
+  }
+  return (
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      className="shrink-0 text-xs font-bold px-4 py-2 rounded-lg disabled:opacity-50 whitespace-nowrap"
+      style={{ background: 'var(--rb-accent)', color: '#0d1117' }}
+    >
+      {loading ? 'Starting…' : 'Re-analyze now'}
+    </button>
+  )
+}
+
 interface Props { call: Call; audioUrl: string | null }
 
 function dur(s: number | null) {
@@ -258,10 +282,23 @@ export function CallDetail({ call, audioUrl }: Props) {
         <div className="lg:col-span-2 space-y-4">
 
           {/* Final Expense */}
-          {analysis?.final_expense && (
+          {analysis?.final_expense ? (
             <Panel title="Final Expense Qualifier">
               <FinalExpenseCard data={analysis.final_expense} />
             </Panel>
+          ) : analysis && (
+            <div
+              className="rounded-xl px-5 py-4 flex items-start justify-between gap-4"
+              style={{ background: '#1c1204', border: '1px solid #3d2a08' }}
+            >
+              <div>
+                <p className="text-sm font-bold" style={{ color: '#f79009' }}>Final Expense Qualifier not available</p>
+                <p className="text-xs mt-1 leading-relaxed" style={{ color: '#7a5c2e' }}>
+                  This call was analyzed before the FE qualifier was added. Re-analyze to extract age, insurance interest, bank account, affordability, and compliance flags.
+                </p>
+              </div>
+              <ReanalyzeBtn callId={call.id} />
+            </div>
           )}
 
           {analysis ? (
