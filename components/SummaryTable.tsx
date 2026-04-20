@@ -104,9 +104,9 @@ export function SummaryTable({ byCampaign, byPublisher, byTarget }: Props) {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className="text-xs font-medium px-3 py-1.5 rounded-md transition-colors"
+            className="text-xs font-medium px-3 py-1.5 rounded-md transition-colors hover:bg-[var(--rb-surface-2)] focus-visible:bg-[var(--rb-surface-2)]"
             style={{
-              background: tab === key ? 'var(--rb-accent)' + '22' : 'transparent',
+              background: tab === key ? 'var(--rb-accent)' + '22' : undefined,
               color: tab === key ? 'var(--rb-accent)' : 'var(--rb-text-3)',
               border: `1px solid ${tab === key ? 'var(--rb-accent)' + '44' : 'transparent'}`,
             }}
@@ -133,7 +133,14 @@ export function SummaryTable({ byCampaign, byPublisher, byTarget }: Props) {
             <tbody>
               {(tab === 'campaign' ? byCampaign : byPublisher).length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-xs" style={{ color: 'var(--rb-text-3)' }}>No data</td>
+                  <td colSpan={7}>
+                    <div className="flex flex-col items-center justify-center py-10 gap-2">
+                      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--rb-text-3)' }}>
+                        <circle cx="14" cy="14" r="11" /><path d="M9 14h10M14 9v10" strokeLinecap="round" opacity=".4" />
+                      </svg>
+                      <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>No data for this period</p>
+                    </div>
+                  </td>
                 </tr>
               ) : (
                 <>
@@ -198,7 +205,14 @@ export function SummaryTable({ byCampaign, byPublisher, byTarget }: Props) {
             <tbody>
               {byTarget.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-xs" style={{ color: 'var(--rb-text-3)' }}>No data</td>
+                  <td colSpan={6}>
+                    <div className="flex flex-col items-center justify-center py-10 gap-2">
+                      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--rb-text-3)' }}>
+                        <circle cx="14" cy="14" r="11" /><path d="M9 14h10M14 9v10" strokeLinecap="round" opacity=".4" />
+                      </svg>
+                      <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>No data for this period</p>
+                    </div>
+                  </td>
                 </tr>
               ) : (
                 <>

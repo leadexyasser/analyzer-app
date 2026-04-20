@@ -34,8 +34,8 @@ function QBadge({ score }: { score: number | null }) {
   if (score == null) return <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
   const [bg, color] =
     score >= 70 ? ['#0d2e1e', '#12b76a']
-    : score >= 40 ? ['#2e1f04', '#f79009']
-    : ['#2e0d0d', '#f04438']
+    : score >= 40 ? ['var(--rb-borderline-bg)', '#f79009']
+    : ['var(--rb-disqualified-bg)', '#f04438']
   return (
     <span className="text-xs font-bold px-2 py-0.5 rounded-md tabular-nums" style={{ background: bg, color }}>
       {score}
@@ -46,7 +46,7 @@ function QBadge({ score }: { score: number | null }) {
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, [string, string]> = {
     complete:    ['#0d2e1e', '#12b76a'],
-    failed:      ['#2e0d0d', '#f04438'],
+    failed:      ['var(--rb-disqualified-bg)', '#f04438'],
     pending:     ['#1e2d40', '#7a8fa6'],
     downloading: ['#0d1e2e', '#38bdf8'],
     transcribing:['#1a0d2e', '#a78bfa'],
@@ -65,8 +65,8 @@ function IntentBadge({ verdict }: { verdict: string | null }) {
   if (!verdict) return null
   const map: Record<string, [string, string]> = {
     qualified:   ['#0d2e1e', '#12b76a'],
-    borderline:  ['#2e1f04', '#f79009'],
-    unqualified: ['#2e0d0d', '#f04438'],
+    borderline:  ['var(--rb-borderline-bg)', '#f79009'],
+    unqualified: ['var(--rb-disqualified-bg)', '#f04438'],
     invalid:     ['#1e2d40', '#7a8fa6'],
   }
   const [bg, color] = map[verdict] ?? ['#1e2d40', '#7a8fa6']
@@ -159,7 +159,7 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
   return (
     <tr>
       <td
-        colSpan={14}
+        colSpan={TOTAL_COLS}
         style={{ background: 'var(--rb-sidebar)', borderBottom: '1px solid var(--rb-border)' }}
       >
         <div className="px-6 py-5 grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -185,10 +185,10 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                 ) : null
               }
               const MAP: Record<string, [string, string, string]> = {
-                qualified:       ['#071a10', '#0d3321', '#12b76a'],
-                borderline:      ['#1c1204', '#3d2a08', '#f79009'],
-                disqualified:    ['#1c0808', '#3d1212', '#f04438'],
-                compliance_risk: ['#200a0a', '#5c1414', '#f04438'],
+                qualified:       ['var(--rb-qualified-bg)', 'var(--rb-qualified-border)', '#12b76a'],
+                borderline:      ['#1c1204', 'var(--rb-borderline-border)', '#f79009'],
+                disqualified:    ['#1c0808', 'var(--rb-disqualified-border)', '#f04438'],
+                compliance_risk: ['var(--rb-compliance-bg)', 'var(--rb-compliance-border)', '#f04438'],
               }
               const [bg, border, color] = MAP[fe.qualifier_verdict] ?? ['#141e2d', '#1e2d40', '#7a8fa6']
               const hasComp = fe.free_government_mentions || fe.outbound_call_claimed || fe.ftc_regulatory_mention || fe.scam_keywords_mentioned || fe.misleading_ad_mention
@@ -222,7 +222,7 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                         <span key={i} className="text-[10px] px-2 py-0.5 rounded" style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}>{f as string}</span>
                       ))}
                       {compFlags.map((f, i) => (
-                        <span key={i} className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ background: '#200a0a', color: '#f04438', border: '1px solid #3d1212' }}>⚠ {f as string}</span>
+                        <span key={i} className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ background: 'var(--rb-compliance-bg)', color: '#f04438', border: '1px solid #3d1212' }}>⚠ {f as string}</span>
                       ))}
                     </div>
                   </div>
@@ -280,7 +280,7 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                   <span
                     key={flag}
                     className="text-xs px-2 py-0.5 rounded"
-                    style={{ background: '#2e0d0d', color: '#f04438', border: '1px solid #3d1212' }}
+                    style={{ background: 'var(--rb-disqualified-bg)', color: '#f04438', border: '1px solid #3d1212' }}
                   >
                     {flag.replace(/_/g, ' ')}
                   </span>
@@ -301,8 +301,8 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                   className="text-xs font-bold px-2 py-0.5 rounded-md"
                   style={{
                     background: fe.qualifier_verdict === 'qualified' ? '#0d2e1e'
-                      : fe.qualifier_verdict === 'borderline' ? '#2e1f04'
-                      : '#2e0d0d',
+                      : fe.qualifier_verdict === 'borderline' ? 'var(--rb-borderline-bg)'
+                      : 'var(--rb-disqualified-bg)',
                     color: fe.qualifier_verdict === 'qualified' ? '#12b76a'
                       : fe.qualifier_verdict === 'borderline' ? '#f79009'
                       : '#f04438',
@@ -381,8 +381,8 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
               <div
                 className="rounded-xl p-4 space-y-2"
                 style={{
-                  background: complianceClean ? '#071a10' : '#1c0808',
-                  border: `1px solid ${complianceClean ? '#0d3321' : '#3d1212'}`,
+                  background: complianceClean ? 'var(--rb-qualified-bg)' : '#1c0808',
+                  border: `1px solid ${complianceClean ? 'var(--rb-qualified-border)' : 'var(--rb-disqualified-border)'}`,
                 }}
               >
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
@@ -396,7 +396,7 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                 {complianceFlagList.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1">
                     {complianceFlagList.map(label => (
-                      <span key={label} className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ background: '#200a0a', color: '#f04438', border: '1px solid #3d1212' }}>
+                      <span key={label} className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ background: 'var(--rb-compliance-bg)', color: '#f04438', border: '1px solid #3d1212' }}>
                         {label}
                       </span>
                     ))}
@@ -473,7 +473,7 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <IntentBadge verdict={analysis.lead_intent.verdict} />
                   {analysis.call_outcome === 'sale_closed'
-                    ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: '#071a10', color: '#12b76a', border: '1px solid #0d3321' }}>✓ Sale Closed</span>
+                    ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-qualified-bg)', color: '#12b76a', border: '1px solid #0d3321' }}>✓ Sale Closed</span>
                     : <span className="text-[10px] px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-surface)', color: 'var(--rb-text-3)', border: '1px solid var(--rb-border)' }}>Not closed</span>
                   }
                 </div>
@@ -488,6 +488,8 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
     </tr>
   )
 }
+
+const TOTAL_COLS = 16 // 15 data cols + 1 expand chevron col
 
 // ── filters ───────────────────────────────────────────────────────────────────
 
@@ -545,50 +547,71 @@ function DarkSelect({ value, onChange, children }: {
   )
 }
 
+const sectionLabel: React.CSSProperties = {
+  fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+  color: 'var(--rb-text-3)', paddingBottom: '6px', borderBottom: '1px solid var(--rb-border)',
+  marginBottom: '8px',
+}
+
 function FiltersPanel({ filters, onChange, onReset }: {
   filters: Filters; onChange: (k: keyof Filters, v: string) => void; onReset: () => void
 }) {
   const hasActive = Object.values(filters).some(Boolean)
   return (
     <div
-      className="rounded-xl p-4 space-y-3"
+      className="rounded-xl p-4 space-y-4"
       style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}
     >
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
-        <DarkInput placeholder="Campaign" value={filters.campaign} onChange={v => onChange('campaign', v)} />
-        <DarkInput placeholder="Publisher / Source" value={filters.publisher} onChange={v => onChange('publisher', v)} />
-        <DarkInput placeholder="Target name" value={filters.target_name} onChange={v => onChange('target_name', v)} />
-        <DarkInput placeholder="Caller ID" value={filters.caller_id} onChange={v => onChange('caller_id', v)} />
-        <DarkInput placeholder="End call source" value={filters.end_call_source} onChange={v => onChange('end_call_source', v)} />
-
-        <DarkSelect value={filters.status || 'all'} onChange={v => onChange('status', v === 'all' ? '' : v)}>
-          <option value="all">All statuses</option>
-          <option value="complete">Complete</option>
-          <option value="failed">Failed</option>
-          <option value="pending">Pending</option>
-          <option value="downloading">Downloading</option>
-          <option value="transcribing">Transcribing</option>
-          <option value="analyzing">Analyzing</option>
-        </DarkSelect>
-
-        <DarkSelect value={filters.is_duplicate || 'all'} onChange={v => onChange('is_duplicate', v === 'all' ? '' : v)}>
-          <option value="all">Duplicates: All</option>
-          <option value="true">Duplicates only</option>
-          <option value="false">Unique only</option>
-        </DarkSelect>
-
-        <DarkInput placeholder="Min score" type="number" value={filters.min_score} onChange={v => onChange('min_score', v)} />
-        <DarkInput placeholder="Max score" type="number" value={filters.max_score} onChange={v => onChange('max_score', v)} />
-        <DarkInput type="date" value={filters.from} onChange={v => onChange('from', v)} />
-        <DarkInput type="date" value={filters.to} onChange={v => onChange('to', v)} />
+      {/* Call Info */}
+      <div>
+        <p style={sectionLabel}>Call Info</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2">
+          <DarkInput placeholder="Campaign" value={filters.campaign} onChange={v => onChange('campaign', v)} />
+          <DarkInput placeholder="Publisher / Source" value={filters.publisher} onChange={v => onChange('publisher', v)} />
+          <DarkInput placeholder="Target name" value={filters.target_name} onChange={v => onChange('target_name', v)} />
+          <DarkInput placeholder="Caller ID" value={filters.caller_id} onChange={v => onChange('caller_id', v)} />
+          <DarkInput placeholder="End call source" value={filters.end_call_source} onChange={v => onChange('end_call_source', v)} />
+        </div>
       </div>
+
+      {/* Date Range */}
+      <div>
+        <p style={sectionLabel}>Date Range</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <DarkInput type="date" value={filters.from} onChange={v => onChange('from', v)} />
+          <span className="text-xs" style={{ color: 'var(--rb-text-3)' }}>→</span>
+          <DarkInput type="date" value={filters.to} onChange={v => onChange('to', v)} />
+        </div>
+      </div>
+
+      {/* Status & Quality */}
+      <div>
+        <p style={sectionLabel}>Status & Quality</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          <DarkSelect value={filters.status || 'all'} onChange={v => onChange('status', v === 'all' ? '' : v)}>
+            <option value="all">All statuses</option>
+            <option value="complete">Complete</option>
+            <option value="failed">Failed</option>
+            <option value="pending">Pending</option>
+            <option value="downloading">Downloading</option>
+            <option value="transcribing">Transcribing</option>
+            <option value="analyzing">Analyzing</option>
+          </DarkSelect>
+          <DarkSelect value={filters.is_duplicate || 'all'} onChange={v => onChange('is_duplicate', v === 'all' ? '' : v)}>
+            <option value="all">Duplicates: All</option>
+            <option value="true">Duplicates only</option>
+            <option value="false">Unique only</option>
+          </DarkSelect>
+          <DarkInput placeholder="Min score" type="number" value={filters.min_score} onChange={v => onChange('min_score', v)} />
+          <DarkInput placeholder="Max score" type="number" value={filters.max_score} onChange={v => onChange('max_score', v)} />
+        </div>
+      </div>
+
       {hasActive && (
         <button
           onClick={onReset}
-          className="flex items-center gap-1 text-xs transition-colors"
+          className="flex items-center gap-1 text-xs transition-colors hover:text-[var(--rb-red)] focus-visible:text-[var(--rb-red)]"
           style={{ color: 'var(--rb-text-3)' }}
-          onMouseEnter={e => (e.currentTarget.style.color = 'var(--rb-red)')}
-          onMouseLeave={e => (e.currentTarget.style.color = 'var(--rb-text-3)')}
         >
           <X size={11} /> Clear filters
         </button>
@@ -640,11 +663,15 @@ export function CallsTable() {
   const totalPages = Math.ceil(total / 50)
   const activeFilterCount = Object.values(filters).filter(Boolean).length
 
-  const TH = ({ children }: { children: React.ReactNode }) => (
+  const TH = ({ children, sticky = false }: { children: React.ReactNode; sticky?: boolean }) => (
     <th
       scope="col"
       className="text-left px-3 py-3 text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap"
-      style={{ color: 'var(--rb-text-3)', background: 'var(--rb-sidebar)' }}
+      style={{
+        color: 'var(--rb-text-3)',
+        background: 'var(--rb-sidebar)',
+        ...(sticky ? { position: 'sticky', left: 0, zIndex: 2, boxShadow: '2px 0 4px rgba(0,0,0,0.3)' } : {}),
+      }}
     >
       {children}
     </th>
@@ -702,8 +729,8 @@ export function CallsTable() {
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr style={{ borderBottom: '1px solid var(--rb-border)' }}>
-                <th style={{ width: 32, background: 'var(--rb-sidebar)' }} />
-                {COLS.map(c => <TH key={c}>{c}</TH>)}
+                <th style={{ width: 32, background: 'var(--rb-sidebar)', position: 'sticky', left: 0, zIndex: 2 }} />
+                {COLS.map((c, i) => <TH key={c} sticky={i === 0}>{c}</TH>)}
               </tr>
             </thead>
             <tbody>
@@ -758,12 +785,28 @@ export function CallsTable() {
                       onMouseLeave={e => (e.currentTarget as HTMLTableRowElement).style.background = isExpanded ? 'var(--rb-surface-2)' : 'transparent'}
                       onClick={() => setExpandedId(isExpanded ? null : (call.id ?? null))}
                     >
-                      <td className="pl-3 py-3">
+                      <td
+                        className="pl-3 py-3"
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={isExpanded}
+                        aria-label={isExpanded ? 'Collapse row' : 'Expand row'}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedId(isExpanded ? null : (call.id ?? null)) } }}
+                        style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--rb-surface)' }}
+                      >
                         <span style={{ color: 'var(--rb-text-3)' }}>
                           {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         </span>
                       </td>
-                      <td className="px-3 py-3 whitespace-nowrap text-xs tabular-nums" style={{ color: 'var(--rb-text-2)' }}>
+                      <td
+                        className="px-3 py-3 whitespace-nowrap text-xs tabular-nums"
+                        style={{
+                          color: 'var(--rb-text-2)',
+                          position: 'sticky', left: 32, zIndex: 1,
+                          background: 'var(--rb-surface)',
+                          boxShadow: '2px 0 4px rgba(0,0,0,0.3)',
+                        }}
+                      >
                         {fmt(call.received_at ?? null)}
                       </td>
                       <td className="px-3 py-3 max-w-[100px]">
@@ -782,7 +825,7 @@ export function CallsTable() {
                         {(call as any).is_duplicate == null
                           ? <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
                           : (call as any).is_duplicate
-                          ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#2e1f04', color: '#f79009' }}>DUP</span>
+                          ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--rb-borderline-bg)', color: '#f79009' }}>DUP</span>
                           : <span className="text-xs" style={{ color: 'var(--rb-text-3)' }}>No</span>}
                       </td>
                       <td className="px-3 py-3 max-w-[100px]">
@@ -807,7 +850,7 @@ export function CallsTable() {
                           const score = computeFELeadQuality(fe)
                           if (score == null) return <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
                           const color = score >= 70 ? '#12b76a' : score >= 40 ? '#f79009' : '#f04438'
-                          const bg = score >= 70 ? '#0d2e1e' : score >= 40 ? '#2e1f04' : '#2e0d0d'
+                          const bg = score >= 70 ? '#0d2e1e' : score >= 40 ? 'var(--rb-borderline-bg)' : 'var(--rb-disqualified-bg)'
                           return (
                             <span className="text-xs font-bold px-2 py-0.5 rounded-md tabular-nums" style={{ background: bg, color }}>
                               {score}%
@@ -822,8 +865,8 @@ export function CallsTable() {
                           if (!fe) return <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
                           const clean = !hasComplianceIssue(fe)
                           return clean
-                            ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: '#071a10', color: '#12b76a' }}>✓ Clean</span>
-                            : <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: '#200a0a', color: '#f04438' }}>⚠ Risk</span>
+                            ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-qualified-bg)', color: '#12b76a' }}>✓ Clean</span>
+                            : <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-compliance-bg)', color: '#f04438' }}>⚠ Risk</span>
                         })()}
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
@@ -831,7 +874,7 @@ export function CallsTable() {
                           const outcome = (call.analysis as any)?.call_outcome
                           if (!outcome) return <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
                           if (outcome === 'sale_closed') {
-                            return <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: '#071a10', color: '#12b76a', border: '1px solid #0d3321' }}>✓ Closed</span>
+                            return <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-qualified-bg)', color: '#12b76a', border: '1px solid #0d3321' }}>✓ Closed</span>
                           }
                           return <span className="text-[10px] px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-3)', border: '1px solid var(--rb-border)' }}>No</span>
                         })()}
@@ -854,8 +897,8 @@ export function CallsTable() {
             className="flex items-center justify-between px-4 py-3"
             style={{ borderTop: '1px solid var(--rb-border)' }}
           >
-            <span className="text-xs" style={{ color: 'var(--rb-text-3)' }}>
-              Page {page} of {totalPages}
+            <span className="text-xs tabular-nums" style={{ color: 'var(--rb-text-3)' }}>
+              Showing {((page - 1) * 50 + 1).toLocaleString()}–{Math.min(page * 50, total).toLocaleString()} of {total.toLocaleString()} calls
             </span>
             <div className="flex gap-2">
               {[

@@ -54,7 +54,8 @@ export default function LoginPage() {
                 className="w-10 h-10 rounded-full flex items-center justify-center mx-auto text-xl"
                 style={{ background: 'var(--rb-accent)' + '22' }}
               >
-                ✉️
+                <span aria-hidden="true">✉️</span>
+                <span className="sr-only">Email sent</span>
               </div>
               <p className="text-sm font-medium" style={{ color: 'var(--rb-text)' }}>Check your inbox</p>
               <p className="text-xs" style={{ color: 'var(--rb-text-2)' }}>

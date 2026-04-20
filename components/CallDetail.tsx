@@ -67,25 +67,25 @@ function Ring({ score }: { score: number }) {
 }
 
 const OUTCOME_COLORS: Record<string, [string, string]> = {
-  transferred:          ['#071a10', '#12b76a'],
-  qualified_no_transfer:['#071a10', '#4ade80'],
-  not_qualified:        ['#1c0808', '#f04438'],
-  hung_up_early:        ['#1c1204', '#f79009'],
+  transferred:          ['var(--rb-qualified-bg)', '#12b76a'],
+  qualified_no_transfer:['var(--rb-qualified-bg)', '#4ade80'],
+  not_qualified:        ['var(--rb-disqualified-bg)', '#f04438'],
+  hung_up_early:        ['var(--rb-borderline-bg)', '#f79009'],
   voicemail:            ['#141e2d', '#7a8fa6'],
   wrong_number:         ['#141e2d', '#7a8fa6'],
   callback_scheduled:   ['#0d142e', '#818cf8'],
-  sale_closed:          ['#071a10', '#12b76a'],
+  sale_closed:          ['var(--rb-qualified-bg)', '#12b76a'],
   unclear:              ['#141e2d', '#4d6078'],
 }
 
 const FLAG_COLORS: Record<string, [string, string]> = {
-  agent_unprofessional:  ['#1c0808', '#f04438'],
-  compliance_concern:    ['#200a0a', '#f04438'],
-  caller_hostile:        ['#1c1204', '#f79009'],
-  premature_hangup:      ['#1c1204', '#f79009'],
-  agent_script_deviation:['#1c1204', '#fbbf24'],
-  dead_air_excessive:    ['#1c1204', '#fbbf24'],
-  caller_confused:       ['#1c1204', '#fbbf24'],
+  agent_unprofessional:  ['var(--rb-disqualified-bg)', '#f04438'],
+  compliance_concern:    ['var(--rb-compliance-bg)', '#f04438'],
+  caller_hostile:        ['var(--rb-borderline-bg)', '#f79009'],
+  premature_hangup:      ['var(--rb-borderline-bg)', '#f79009'],
+  agent_script_deviation:['var(--rb-borderline-bg)', '#fbbf24'],
+  dead_air_excessive:    ['var(--rb-borderline-bg)', '#fbbf24'],
+  caller_confused:       ['var(--rb-borderline-bg)', '#fbbf24'],
   audio_quality_poor:    ['#141e2d', '#7a8fa6'],
   insufficient_audio:    ['#141e2d', '#7a8fa6'],
   language_mismatch:     ['#0d142e', '#818cf8'],
@@ -117,8 +117,8 @@ export function CallDetail({ call, audioUrl }: Props) {
   const qBreakColor = (v: number) => v >= 7 ? '#12b76a' : v >= 4 ? '#f79009' : '#f04438'
 
   const STATUS_COLORS: Record<string, [string, string]> = {
-    complete:    ['#071a10', '#12b76a'],
-    failed:      ['#1c0808', '#f04438'],
+    complete:    ['var(--rb-qualified-bg)', '#12b76a'],
+    failed:      ['var(--rb-disqualified-bg)', '#f04438'],
     pending:     ['#1e2d40', '#7a8fa6'],
     downloading: ['#0d1e2e', '#38bdf8'],
     transcribing:['#1a0d2e', '#a78bfa'],
@@ -144,7 +144,7 @@ export function CallDetail({ call, audioUrl }: Props) {
               {call.status}
             </span>
             {(call as any).is_duplicate && (
-              <span className="text-xs font-bold px-2.5 py-1 rounded-md" style={{ background: '#2e1f04', color: '#f79009' }}>
+              <span className="text-xs font-bold px-2.5 py-1 rounded-md" style={{ background: 'var(--rb-borderline-bg)', color: '#f79009' }}>
                 DUPLICATE
               </span>
             )}
@@ -164,7 +164,7 @@ export function CallDetail({ call, audioUrl }: Props) {
       </div>
 
       {call.error_message && (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#1c0808', border: '1px solid #3d1212', color: '#f87171' }}>
+        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--rb-disqualified-bg)', border: '1px solid #3d1212', color: '#f87171' }}>
           <strong>Error:</strong> {call.error_message}
         </div>
       )}
@@ -266,7 +266,7 @@ export function CallDetail({ call, audioUrl }: Props) {
           ) : analysis && (
             <div
               className="rounded-xl px-5 py-4 flex items-start justify-between gap-4"
-              style={{ background: '#1c1204', border: '1px solid #3d2a08' }}
+              style={{ background: 'var(--rb-borderline-bg)', border: '1px solid #3d2a08' }}
             >
               <div>
                 <p className="text-sm font-bold" style={{ color: '#f79009' }}>Final Expense Qualifier not available</p>
@@ -332,7 +332,7 @@ export function CallDetail({ call, audioUrl }: Props) {
                         <span
                           className="inline-block text-xs font-bold px-2.5 py-1 rounded-md"
                           style={{
-                            background: analysis.lead_intent.verdict === 'qualified' ? '#071a10' : analysis.lead_intent.verdict === 'borderline' ? '#1c1204' : '#1c0808',
+                            background: analysis.lead_intent.verdict === 'qualified' ? 'var(--rb-qualified-bg)' : analysis.lead_intent.verdict === 'borderline' ? 'var(--rb-borderline-bg)' : 'var(--rb-disqualified-bg)',
                             color: analysis.lead_intent.verdict === 'qualified' ? '#12b76a' : analysis.lead_intent.verdict === 'borderline' ? '#f79009' : '#f04438',
                           }}
                         >
@@ -344,7 +344,7 @@ export function CallDetail({ call, audioUrl }: Props) {
                       </div>
                     </div>
                     {analysis.lead_intent.misalignment_reason && (
-                      <div className="rounded-lg px-3.5 py-2.5" style={{ background: '#1c1204', border: '1px solid #3d2a08' }}>
+                      <div className="rounded-lg px-3.5 py-2.5" style={{ background: 'var(--rb-borderline-bg)', border: '1px solid #3d2a08' }}>
                         <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: '#f79009' }}>Misalignment</p>
                         <p className="text-xs leading-relaxed" style={{ color: '#d4a055' }}>{analysis.lead_intent.misalignment_reason}</p>
                       </div>
@@ -386,22 +386,14 @@ export function CallDetail({ call, audioUrl }: Props) {
                     {analysis.flags.map(flag => {
                       const [bg, color] = FLAG_COLORS[flag] ?? ['#141e2d', '#7a8fa6']
                       return (
-                        <div key={flag} className="group relative">
-                          <span
-                            className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold cursor-default"
-                            style={{ background: bg, color }}
-                          >
-                            {flag.replace(/_/g, ' ')}
-                          </span>
-                          {analysis.flag_details[flag] && (
-                            <div
-                              className="absolute bottom-full left-0 mb-2 z-20 w-52 text-xs rounded-xl p-2.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl"
-                              style={{ background: '#1c2636', border: '1px solid #283347', color: 'var(--rb-text-2)' }}
-                            >
-                              {analysis.flag_details[flag]}
-                            </div>
-                          )}
-                        </div>
+                        <span
+                          key={flag}
+                          className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold cursor-default"
+                          style={{ background: bg, color }}
+                          title={analysis.flag_details[flag] ?? undefined}
+                        >
+                          {flag.replace(/_/g, ' ')}
+                        </span>
                       )
                     })}
                   </div>

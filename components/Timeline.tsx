@@ -3,9 +3,7 @@
 import { useMemo } from 'react'
 
 interface Props {
-  // Array of 24 values, index = hour 0–23
   hourly: number[]
-  // Labels for the x-axis ticks we want to show
   timezone?: string
 }
 
@@ -31,7 +29,6 @@ export function Timeline({ hourly }: Props) {
       return { x, y, barH, count, h, isNow, past }
     }), [hourly, max, now, chartH])
 
-  // X-axis: show every 3 hours
   const xTicks = [0, 3, 6, 9, 12, 15, 18, 21]
 
   const fmtHour = (h: number) => {
@@ -69,10 +66,7 @@ export function Timeline({ hourly }: Props) {
           const val = Math.round(pct * max)
           return (
             <g key={pct}>
-              <line
-                x1={PAD_L} y1={y} x2={W} y2={y}
-                stroke="#1e2d40" strokeWidth="1" strokeDasharray="4 4"
-              />
+              <line x1={PAD_L} y1={y} x2={W} y2={y} stroke="#1e2d40" strokeWidth="1" strokeDasharray="4 4" />
               <text x={PAD_L - 4} y={y + 4} textAnchor="end" fontSize="9" fill="#4d6078">{val}</text>
             </g>
           )
@@ -81,12 +75,9 @@ export function Timeline({ hourly }: Props) {
         {/* Bars */}
         {bars.map(({ x, y, barH, count, h, isNow, past }) => (
           <g key={h}>
+            {/* Actual bar */}
             <rect
-              x={x}
-              y={y}
-              width={barW}
-              height={barH}
-              rx="2"
+              x={x} y={y} width={barW} height={barH} rx="2"
               fill={
                 count === 0 ? '#1e2d40'
                 : isNow ? '#00c9a7'
@@ -94,18 +85,18 @@ export function Timeline({ hourly }: Props) {
                 : '#1e2d40'
               }
             />
-            {/* Tooltip on hover (title element) */}
-            {count > 0 && (
-              <title>{fmtHour(h)}: {count} call{count !== 1 ? 's' : ''}</title>
-            )}
+            {/* Full-height hover overlay for tooltip discovery (including zero-count hours) */}
+            <rect
+              x={x} y={PAD_T} width={barW} height={chartH} rx="2"
+              fill="transparent"
+            >
+              <title>{count === 0 ? `No calls at ${fmtHour(h)}` : `${fmtHour(h)}: ${count} call${count !== 1 ? 's' : ''}`}</title>
+            </rect>
           </g>
         ))}
 
         {/* X-axis line */}
-        <line
-          x1={PAD_L} y1={PAD_T + chartH} x2={W} y2={PAD_T + chartH}
-          stroke="#1e2d40" strokeWidth="1"
-        />
+        <line x1={PAD_L} y1={PAD_T + chartH} x2={W} y2={PAD_T + chartH} stroke="#1e2d40" strokeWidth="1" />
 
         {/* X-axis labels */}
         {xTicks.map(h => {
@@ -122,10 +113,7 @@ export function Timeline({ hourly }: Props) {
           const x = PAD_L + Math.round((now / 24) * chartW) + barW / 2
           return (
             <g>
-              <line
-                x1={x} y1={PAD_T} x2={x} y2={PAD_T + chartH}
-                stroke="#00c9a7" strokeWidth="1" strokeDasharray="3 3" opacity="0.5"
-              />
+              <line x1={x} y1={PAD_T} x2={x} y2={PAD_T + chartH} stroke="#00c9a7" strokeWidth="1" strokeDasharray="3 3" opacity="0.5" />
               <text x={x} y={PAD_T - 2} textAnchor="middle" fontSize="8" fill="#00c9a7">now</text>
             </g>
           )

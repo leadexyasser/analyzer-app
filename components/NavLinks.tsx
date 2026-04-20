@@ -29,13 +29,11 @@ export function NavLinks() {
           <Link
             key={item.href}
             href={item.href}
-            className="flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition-colors"
+            className="flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition-colors hover:bg-[var(--rb-surface-2)] focus-visible:bg-[var(--rb-surface-2)]"
             style={{
-              background: active ? 'var(--rb-accent)22' : 'transparent',
+              background: active ? 'var(--rb-accent)22' : undefined,
               color: active ? 'var(--rb-accent)' : 'var(--rb-text-2)',
             }}
-            onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--rb-surface-2)' }}
-            onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
           >
             {item.icon}
             {item.label}

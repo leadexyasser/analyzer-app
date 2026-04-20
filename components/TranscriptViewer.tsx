@@ -53,11 +53,11 @@ export function TranscriptViewer({ transcriptText, segments, agentSpeaker = 'unc
     <div className="space-y-3">
       <div className="flex items-center gap-4 px-1">
         <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--rb-text-3)' }}>
-          <span className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--rb-accent)' }} />
+          <span aria-hidden="true" className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--rb-accent)' }} />
           Agent
         </span>
         <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--rb-text-3)' }}>
-          <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#374761' }} />
+          <span aria-hidden="true" className="w-2.5 h-2.5 rounded-full" style={{ background: '#374761' }} />
           Caller
         </span>
         {onSeek && (
@@ -116,10 +116,9 @@ export function TranscriptViewer({ transcriptText, segments, agentSpeaker = 'unc
                 {onSeek && (
                   <button
                     onClick={() => onSeek(seg.start)}
-                    className="text-[10px] mt-1 tabular-nums transition-colors"
+                    aria-label={`Seek to ${fmt(seg.start)}`}
+                    className="text-[10px] mt-1 tabular-nums transition-colors hover:text-[var(--rb-accent)] focus-visible:text-[var(--rb-accent)]"
                     style={{ color: 'var(--rb-text-3)' }}
-                    onMouseEnter={e => (e.currentTarget.style.color = 'var(--rb-accent)')}
-                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--rb-text-3)')}
                   >
                     {fmt(seg.start)}
                   </button>

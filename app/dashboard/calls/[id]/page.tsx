@@ -4,6 +4,7 @@ import { getSignedUrl } from '@/lib/storage'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { CallDetail } from '@/components/CallDetail'
+import { BackButton } from '@/components/BackButton'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params
@@ -40,6 +41,7 @@ export default async function CallDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="space-y-6">
+      <BackButton />
       <nav className="flex items-center gap-2 text-xs" aria-label="Breadcrumb">
         <Link
           href="/dashboard"

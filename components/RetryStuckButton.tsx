@@ -29,19 +29,12 @@ export function RetryStuckButton() {
     <button
       onClick={handleClick}
       disabled={loading}
-      className="flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
+      aria-label="Retry stuck calls"
+      className="flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg transition-colors disabled:opacity-50 hover:border-[var(--rb-accent)] hover:text-[var(--rb-accent)] focus-visible:border-[var(--rb-accent)] focus-visible:text-[var(--rb-accent)]"
       style={{
         background: 'var(--rb-surface)',
         border: '1px solid var(--rb-border-2)',
         color: 'var(--rb-text-2)',
-      }}
-      onMouseEnter={e => {
-        (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--rb-accent)'
-        ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--rb-accent)'
-      }}
-      onMouseLeave={e => {
-        (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--rb-border-2)'
-        ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--rb-text-2)'
       }}
     >
       <span className={`w-2 h-2 rounded-full ${loading ? 'bg-amber-400 animate-pulse' : 'bg-[#283347]'}`} />

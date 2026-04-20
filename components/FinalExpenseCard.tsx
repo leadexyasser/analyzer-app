@@ -7,9 +7,9 @@ interface Props { data: FinalExpenseQualifier }
 type Signal = 'good' | 'warn' | 'bad' | 'neutral'
 
 const SIG_COLORS: Record<Signal, { dot: string; bg: string; border: string; text: string }> = {
-  good:    { dot: '#12b76a', bg: '#071a10', border: '#0d3321', text: '#4ade80' },
-  warn:    { dot: '#f79009', bg: '#1c1204', border: '#3d2a08', text: '#fbbf24' },
-  bad:     { dot: '#f04438', bg: '#1c0808', border: '#3d1212', text: '#f87171' },
+  good:    { dot: 'var(--rb-qualified-text)', bg: 'var(--rb-qualified-bg)', border: 'var(--rb-qualified-border)', text: '#4ade80' },
+  warn:    { dot: 'var(--rb-borderline-text)', bg: 'var(--rb-borderline-bg)', border: 'var(--rb-borderline-border)', text: '#fbbf24' },
+  bad:     { dot: 'var(--rb-disqualified-text)', bg: 'var(--rb-disqualified-bg)', border: 'var(--rb-disqualified-border)', text: '#f87171' },
   neutral: { dot: '#4d6078', bg: '#141e2d', border: '#1e2d40', text: '#7a8fa6' },
 }
 
@@ -74,10 +74,10 @@ function Ring({ score }: { score: number }) {
 
 export function FinalExpenseCard({ data }: Props) {
   const VERDICT = {
-    qualified:       { bg: '#071a10', border: '#0d3321', text: '#12b76a', label: 'Qualified' },
-    borderline:      { bg: '#1c1204', border: '#3d2a08', text: '#f79009', label: 'Borderline' },
-    disqualified:    { bg: '#1c0808', border: '#3d1212', text: '#f04438', label: 'Disqualified' },
-    compliance_risk: { bg: '#200a0a', border: '#5c1414', text: '#f04438', label: '⚠ Compliance Risk' },
+    qualified:       { bg: 'var(--rb-qualified-bg)', border: 'var(--rb-qualified-border)', text: 'var(--rb-qualified-text)', label: 'Qualified' },
+    borderline:      { bg: 'var(--rb-borderline-bg)', border: 'var(--rb-borderline-border)', text: 'var(--rb-borderline-text)', label: 'Borderline' },
+    disqualified:    { bg: 'var(--rb-disqualified-bg)', border: 'var(--rb-disqualified-border)', text: 'var(--rb-disqualified-text)', label: 'Disqualified' },
+    compliance_risk: { bg: 'var(--rb-compliance-bg)', border: 'var(--rb-compliance-border)', text: 'var(--rb-compliance-text)', label: '⚠ Compliance Risk' },
   }[data.qualifier_verdict]
 
   const hasCompliance = data.free_government_mentions || data.outbound_call_claimed || data.ftc_regulatory_mention || data.scam_keywords_mentioned || data.misleading_ad_mention
@@ -105,7 +105,7 @@ export function FinalExpenseCard({ data }: Props) {
 
       {/* Compliance banner */}
       {hasCompliance && (
-        <div className="rounded-xl px-4 py-3 flex items-start gap-3" style={{ background: '#200a0a', border: '1px solid #5c1414' }}>
+        <div className="rounded-xl px-4 py-3 flex items-start gap-3" style={{ background: 'var(--rb-compliance-bg)', border: '1px solid var(--rb-compliance-border)' }}>
           <span className="text-xl shrink-0">⚠️</span>
           <div>
             <p className="text-sm font-bold" style={{ color: '#f04438' }}>Compliance Issue Detected</p>

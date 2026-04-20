@@ -193,6 +193,19 @@ export default async function DashboardPage({
         />
       </div>
 
+      {/* Null state — no analyzed data in range */}
+      {stats.revenue === 0 && stats.closedRate === null && stats.avgFEQuality === null && (
+        <div
+          className="rounded-xl py-8 text-center"
+          style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}
+        >
+          <p className="text-sm font-medium" style={{ color: 'var(--rb-text-2)' }}>No calls found for this date range</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--rb-text-3)' }}>
+            Try selecting a different period, or check that Ringba webhooks are configured.
+          </p>
+        </div>
+      )}
+
       {/* Stats — Row 2: Quality indicators */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatCard

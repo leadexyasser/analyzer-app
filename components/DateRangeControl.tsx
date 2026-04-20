@@ -82,6 +82,7 @@ export function DateRangeControl() {
       <div className="flex items-center gap-1.5">
         <input
           type="date"
+          aria-label="From date"
           value={from}
           onChange={e => setFrom(e.target.value)}
           onBlur={e => { if (from !== currentFrom || to !== currentTo) applyCustom(e.target.value, to) }}
@@ -94,6 +95,7 @@ export function DateRangeControl() {
         <span className="text-xs" style={{ color: 'var(--rb-text-3)' }}>→</span>
         <input
           type="date"
+          aria-label="To date"
           value={to}
           onChange={e => setTo(e.target.value)}
           onBlur={e => { if (from !== currentFrom || to !== currentTo) applyCustom(from, e.target.value) }}

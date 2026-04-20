@@ -66,6 +66,19 @@
   --rb-red:             #f04438;
   --rb-amber:           #f79009;
   --rb-green:           #12b76a;
+  /* Semantic qualification state tokens */
+  --rb-qualified-bg:      #071a10;
+  --rb-qualified-border:  #0d3321;
+  --rb-qualified-text:    #12b76a;
+  --rb-borderline-bg:     #2e1f04;
+  --rb-borderline-border: #3d2a08;
+  --rb-borderline-text:   #f79009;
+  --rb-disqualified-bg:     #2e0d0d;
+  --rb-disqualified-border: #3d1212;
+  --rb-disqualified-text:   #f04438;
+  --rb-compliance-bg:     #200a0a;
+  --rb-compliance-border: #5c1414;
+  --rb-compliance-text:   #f04438;
 }
 
 @layer base {

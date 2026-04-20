@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { RefreshCw } from 'lucide-react'
 
 interface Props {
   callId: string
@@ -34,7 +35,7 @@ export function ReanalyzeButton({ callId, onSuccess, size = 'md' }: Props) {
     <button
       onClick={handleClick}
       disabled={loading}
-      className="font-bold rounded-lg whitespace-nowrap disabled:opacity-50 transition-colors"
+      className="inline-flex items-center gap-1.5 font-bold rounded-lg whitespace-nowrap disabled:opacity-50 transition-colors"
       style={{
         background: 'var(--rb-accent)',
         color: '#0d1117',
@@ -42,6 +43,7 @@ export function ReanalyzeButton({ callId, onSuccess, size = 'md' }: Props) {
         padding: size === 'sm' ? '4px 10px' : '6px 14px',
       }}
     >
+      {loading && <RefreshCw size={11} className="animate-spin" />}
       {loading ? 'Starting…' : 'Re-analyze'}
     </button>
   )
