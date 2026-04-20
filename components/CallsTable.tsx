@@ -650,7 +650,7 @@ export function CallsTable() {
     </th>
   )
 
-  const COLS = ['Date', 'Source', 'Campaign', 'Caller ID', 'Dialed #', 'Dup', 'End Source', 'Target', 'Revenue', 'Payout', 'Duration', 'Quality', 'FE Qualifier', 'Closed', 'Status']
+  const COLS = ['Date', 'Source', 'Campaign', 'Caller ID', 'Dialed #', 'Dup', 'End Source', 'Target', 'Revenue', 'Payout', 'Duration', 'Lead Quality', 'Compliance', 'Closed', 'Status']
 
   return (
     <div className="space-y-3">
@@ -800,36 +800,30 @@ export function CallsTable() {
                       <td className="px-3 py-3 whitespace-nowrap">
                         <span className="text-xs tabular-nums" style={{ color: 'var(--rb-text-2)' }}>{dur(call.duration_seconds ?? null)}</span>
                       </td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <QBadge score={call.quality_score ?? null} />
-                          {leadVerdict && <IntentBadge verdict={leadVerdict} />}
-                        </div>
-                      </td>
-                      {/* FE Qualifier */}
+                      {/* Lead Quality */}
                       <td className="px-3 py-3 whitespace-nowrap">
                         {(() => {
                           const fe = (analysis as any)?.final_expense
-                          if (!fe) {
-                            return call.status === 'complete'
-                              ? <span className="text-[10px]" style={{ color: 'var(--rb-text-3)' }}>needs re-analysis</span>
-                              : <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
-                          }
-                          const MAP: Record<string, [string, string]> = {
-                            qualified:       ['#071a10', '#12b76a'],
-                            borderline:      ['#2e1f04', '#f79009'],
-                            disqualified:    ['#1c0808', '#f04438'],
-                            compliance_risk: ['#200a0a', '#f04438'],
-                          }
-                          const [bg, color] = MAP[fe.qualifier_verdict] ?? ['#1e2d40', '#7a8fa6']
-                          const hasComp = fe.free_government_mentions || fe.outbound_call_claimed || fe.ftc_regulatory_mention || fe.scam_keywords_mentioned || fe.misleading_ad_mention
+                          const score = computeFELeadQuality(fe)
+                          if (score == null) return <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
+                          const color = score >= 70 ? '#12b76a' : score >= 40 ? '#f79009' : '#f04438'
+                          const bg = score >= 70 ? '#0d2e1e' : score >= 40 ? '#2e1f04' : '#2e0d0d'
                           return (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: bg, color }}>
-                              {hasComp && '⚠ '}
-                              {fe.qualifier_verdict.replace('_', ' ')}
-                              <span className="opacity-70">· {fe.qualifier_score}</span>
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-md tabular-nums" style={{ background: bg, color }}>
+                              {score}%
                             </span>
                           )
+                        })()}
+                      </td>
+                      {/* Compliance */}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {(() => {
+                          const fe = (analysis as any)?.final_expense
+                          if (!fe) return <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
+                          const clean = !hasComplianceIssue(fe)
+                          return clean
+                            ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: '#071a10', color: '#12b76a' }}>✓ Clean</span>
+                            : <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: '#200a0a', color: '#f04438' }}>⚠ Risk</span>
                         })()}
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
