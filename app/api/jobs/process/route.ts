@@ -19,21 +19,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, processed: 0, message: 'No jobs queued' })
   }
 
-  const results: Array<{ job_id: string; status: string; error?: string }> = []
-
-  for (const job of jobs) {
+  const results = await Promise.all(jobs.map(async (job) => {
     await markJobRunning(job.id)
     try {
       await processJob(job)
       await markJobDone(job.id)
-      results.push({ job_id: job.id, status: 'done' })
+      return { job_id: job.id, status: 'done' }
     } catch (err: any) {
       const isRateLimit = err instanceof RateLimitError
       const errMsg = err?.message ?? 'Unknown error'
       await markJobFailed(job.id, errMsg, job.attempts, isRateLimit)
-      results.push({ job_id: job.id, status: isRateLimit ? 'rate_limited' : 'failed', error: errMsg })
 
-      // Update call status to failed only after max attempts
       if (!isRateLimit && (job.attempts + 1) >= 3) {
         const supabase = createServiceClient()
         await supabase
@@ -41,8 +37,9 @@ export async function POST(request: NextRequest) {
           .update({ status: 'failed', error_message: errMsg })
           .eq('id', job.call_id)
       }
+      return { job_id: job.id, status: isRateLimit ? 'rate_limited' : 'failed', error: errMsg }
     }
-  }
+  }))
 
   return NextResponse.json({ ok: true, processed: jobs.length, results })
 }

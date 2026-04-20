@@ -36,18 +36,7 @@ export async function dequeueJobs(limit = 3) {
 
   if (error) throw new Error(`Failed to dequeue jobs: ${error.message}`)
 
-  // Cap analyze jobs to 1 per invocation — prevents concurrent Groq calls
-  // from exhausting the 12,000 TPM on-demand limit and causing mass 429s
-  const result: NonNullable<typeof data> = []
-  let analyzeCount = 0
-  for (const job of data ?? []) {
-    if (job.job_type === 'analyze') {
-      if (analyzeCount < 1) { result.push(job); analyzeCount++ }
-    } else {
-      result.push(job)
-    }
-  }
-  return result
+  return data ?? []
 }
 
 export async function markJobRunning(jobId: string) {
