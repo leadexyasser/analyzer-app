@@ -243,7 +243,7 @@ export default async function DashboardPage({
       <SummaryTable byCampaign={stats.byCampaign} byPublisher={stats.byPublisher} byTarget={stats.byTarget} />
 
       {/* Call log */}
-      <CallsTable />
+      <CallsTable dateFrom={start.toISOString()} dateTo={end.toISOString()} />
     </div>
   )
 }

@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
@@ -621,28 +620,9 @@ function FiltersPanel({ filters, onChange, onReset }: {
   )
 }
 
-// ── date range resolution (mirrors dashboard page logic) ─────────────────────
-
-function resolveRange(preset: string, from: string, to: string): { start: Date; end: Date } {
-  const now = new Date()
-  const end = new Date(now); end.setHours(23, 59, 59, 999)
-  if (preset === 'custom' && (from || to)) {
-    const start = from ? new Date(from) : new Date(0)
-    const customEnd = to ? (() => { const d = new Date(to); d.setHours(23, 59, 59, 999); return d })() : end
-    return { start, end: customEnd }
-  }
-  if (preset === 'Today') {
-    const start = new Date(now); start.setHours(0, 0, 0, 0)
-    return { start, end }
-  }
-  const days = preset === '30d' ? 30 : preset === '90d' ? 90 : 7
-  return { start: new Date(Date.now() - days * 24 * 60 * 60 * 1000), end }
-}
-
 // ── main ─────────────────────────────────────────────────────────────────────
 
-export function CallsTable() {
-  const sp = useSearchParams()
+export function CallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
   const [calls, setCalls] = useState<Partial<Call>[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -652,7 +632,18 @@ export function CallsTable() {
   const [filters, setFilters] = useState<Filters>(EMPTY)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const fetchCalls = useCallback(async (p: number, f: Filters, searchParams: URLSearchParams) => {
+  // Reset to page 1 when the date range changes (user switches preset)
+  const prevRangeRef = useRef(`${dateFrom}|${dateTo}`)
+  useEffect(() => {
+    const key = `${dateFrom}|${dateTo}`
+    if (key !== prevRangeRef.current) {
+      prevRangeRef.current = key
+      setPage(1)
+      setFilters(EMPTY)
+    }
+  }, [dateFrom, dateTo])
+
+  const fetchCalls = useCallback(async (p: number, f: Filters, from: string, to: string) => {
     setLoading(true)
     const params = new URLSearchParams({ page: String(p) })
     if (f.status) params.set('status', f.status)
@@ -664,27 +655,10 @@ export function CallsTable() {
     if (f.is_duplicate) params.set('is_duplicate', f.is_duplicate)
     if (f.min_score) params.set('min_score', f.min_score)
     if (f.max_score) params.set('max_score', f.max_score)
-
-    // Filter panel dates override global range; otherwise use the dashboard date range
-    if (f.from) {
-      params.set('from', new Date(f.from).toISOString())
-    } else {
-      const preset = searchParams.get('preset') ?? '7d'
-      const urlFrom = searchParams.get('from') ?? ''
-      const urlTo = searchParams.get('to') ?? ''
-      const { start } = resolveRange(preset, urlFrom, urlTo)
-      params.set('from', start.toISOString())
-    }
-    if (f.to) {
-      const d = new Date(f.to); d.setHours(23, 59, 59, 999); params.set('to', d.toISOString())
-    } else {
-      const preset = searchParams.get('preset') ?? '7d'
-      const urlFrom = searchParams.get('from') ?? ''
-      const urlTo = searchParams.get('to') ?? ''
-      const { end } = resolveRange(preset, urlFrom, urlTo)
-      params.set('to', end.toISOString())
-    }
-
+    // Filter panel dates override; otherwise use server-resolved range
+    params.set('from', f.from ? new Date(f.from).toISOString() : from)
+    if (f.to) { const d = new Date(f.to); d.setHours(23, 59, 59, 999); params.set('to', d.toISOString()) }
+    else params.set('to', to)
     const res = await fetch(`/api/calls?${params}`)
     const data = await res.json()
     setCalls(data.calls ?? [])
@@ -694,18 +668,9 @@ export function CallsTable() {
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => fetchCalls(page, filters, sp), 300)
+    debounceRef.current = setTimeout(() => fetchCalls(page, filters, dateFrom, dateTo), 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [page, filters, fetchCalls, sp])
-
-  // Reset to page 1 when the global date range changes
-  const prevPresetRef = useRef(sp.toString())
-  useEffect(() => {
-    if (sp.toString() !== prevPresetRef.current) {
-      prevPresetRef.current = sp.toString()
-      setPage(1)
-    }
-  }, [sp])
+  }, [page, filters, fetchCalls, dateFrom, dateTo])
 
   const setFilter = (k: keyof Filters, v: string) => { setFilters(f => ({ ...f, [k]: v })); setPage(1) }
   const totalPages = Math.ceil(total / 50)
