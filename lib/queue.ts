@@ -35,7 +35,19 @@ export async function dequeueJobs(limit = 3) {
     .limit(limit)
 
   if (error) throw new Error(`Failed to dequeue jobs: ${error.message}`)
-  return data ?? []
+
+  // Cap analyze jobs to 1 per invocation — prevents concurrent Groq calls
+  // from exhausting the 12,000 TPM on-demand limit and causing mass 429s
+  const result: NonNullable<typeof data> = []
+  let analyzeCount = 0
+  for (const job of data ?? []) {
+    if (job.job_type === 'analyze') {
+      if (analyzeCount < 1) { result.push(job); analyzeCount++ }
+    } else {
+      result.push(job)
+    }
+  }
+  return result
 }
 
 export async function markJobRunning(jobId: string) {
@@ -63,8 +75,9 @@ export async function markJobFailed(
   const supabase = createServiceClient()
 
   if (isRateLimit) {
-    // Rate limited — requeue for 1 min, don't count as a failed attempt
-    const retryAt = new Date(Date.now() + 60_000).toISOString()
+    // Rate limited — requeue for 90s, don't count as a failed attempt
+    // 90s > 60s TPM window, ensuring the rate limit clears before next attempt
+    const retryAt = new Date(Date.now() + 90_000).toISOString()
     await supabase
       .from('processing_jobs')
       .update({ status: 'queued', scheduled_for: retryAt, last_error: error })

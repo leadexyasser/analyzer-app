@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { dequeueJobs, markJobRunning, markJobDone, markJobFailed, enqueueJob } from '@/lib/queue'
 import { downloadAudio, splitAudioIfNeeded } from '@/lib/audio'
 import { uploadRecording } from '@/lib/storage'
-import { transcribeAudio, buildSpeakerLabeledTranscript, analyzeCall, GroqRateLimitError } from '@/lib/groq'
+import { transcribeAudio, buildSpeakerLabeledTranscript, analyzeCall, RateLimitError } from '@/lib/ai'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       await markJobDone(job.id)
       results.push({ job_id: job.id, status: 'done' })
     } catch (err: any) {
-      const isRateLimit = err instanceof GroqRateLimitError
+      const isRateLimit = err instanceof RateLimitError
       const errMsg = err?.message ?? 'Unknown error'
       await markJobFailed(job.id, errMsg, job.attempts, isRateLimit)
       results.push({ job_id: job.id, status: isRateLimit ? 'rate_limited' : 'failed', error: errMsg })

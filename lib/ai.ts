@@ -1,15 +1,15 @@
-import Groq from 'groq-sdk'
+import OpenAI from 'openai'
 import { createServiceClient } from '@/lib/supabase/server'
 import { AnalysisSchema } from '@/types/analysis'
 
-export const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
+export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
-const WHISPER_MODEL = 'whisper-large-v3-turbo'
-const LLM_MODEL = 'llama-3.3-70b-versatile'
+const WHISPER_MODEL = 'whisper-1'
+const LLM_MODEL = 'gpt-4o-mini'
 
 async function logApiCall(params: {
   call_id: string | null
-  service: 'groq_whisper' | 'groq_llm'
+  service: 'openai_whisper' | 'openai_llm'
   duration_ms: number
   status_code: number
   tokens_used?: number | null
@@ -30,10 +30,10 @@ async function logApiCall(params: {
   }
 }
 
-export class GroqRateLimitError extends Error {
+export class RateLimitError extends Error {
   constructor() {
-    super('Groq rate limit exceeded (429)')
-    this.name = 'GroqRateLimitError'
+    super('OpenAI rate limit exceeded (429)')
+    this.name = 'RateLimitError'
   }
 }
 
@@ -49,7 +49,7 @@ export async function transcribeAudio(
 
   try {
     const file = new File([fileBuffer.buffer as ArrayBuffer], filename, { type: 'audio/mpeg' })
-    const response = await groq.audio.transcriptions.create({
+    const response = await openai.audio.transcriptions.create({
       file,
       model: WHISPER_MODEL,
       response_format: 'verbose_json',
@@ -57,7 +57,7 @@ export async function transcribeAudio(
     })
 
     const duration = Date.now() - start
-    await logApiCall({ call_id: callId, service: 'groq_whisper', duration_ms: duration, status_code: 200 })
+    await logApiCall({ call_id: callId, service: 'openai_whisper', duration_ms: duration, status_code: 200 })
 
     const segments = (response as any).segments ?? []
     return { text: (response as any).text ?? '', segments }
@@ -67,20 +67,20 @@ export async function transcribeAudio(
 
     await logApiCall({
       call_id: callId,
-      service: 'groq_whisper',
+      service: 'openai_whisper',
       duration_ms: duration,
       status_code: status,
       error: err?.message,
     })
 
-    if (status === 429) throw new GroqRateLimitError()
+    if (status === 429) throw new RateLimitError()
     throw err
   }
 }
 
 /**
  * Pseudo-speaker diarization via pause detection.
- * Groq Whisper has no native diarization — we detect speaker turns
+ * Whisper has no native diarization — we detect speaker turns
  * by treating gaps >1.5s between segments as a speaker change.
  * This is imperfect: overlapping speech, interruptions, and very
  * short segments may be mis-attributed. The LLM analysis prompt
@@ -194,9 +194,9 @@ Scoring:
 
 Return the JSON now.`
 
-// Groq llama-3.3-70b limit is ~12k TPM. Prompt template ~2k tokens.
-// Cap transcript at ~24k chars (~6k tokens) to stay safely under limit.
-const MAX_TRANSCRIPT_CHARS = 24_000
+// gpt-4o-mini has 128k context. Cap transcript at ~60k chars (~15k tokens)
+// to leave room for prompt + response, with generous headroom.
+const MAX_TRANSCRIPT_CHARS = 60_000
 
 export async function analyzeCall(params: {
   callId: string
@@ -220,8 +220,8 @@ export async function analyzeCall(params: {
 
   const start = Date.now()
 
-  const callLlm = async (messages: Groq.Chat.ChatCompletionMessageParam[]) => {
-    return groq.chat.completions.create({
+  const callLlm = async (messages: OpenAI.Chat.ChatCompletionMessageParam[]) => {
+    return openai.chat.completions.create({
       model: LLM_MODEL,
       temperature: 0.2,
       response_format: { type: 'json_object' },
@@ -231,7 +231,7 @@ export async function analyzeCall(params: {
 
   let rawResponse = ''
   try {
-    const messages: Groq.Chat.ChatCompletionMessageParam[] = [
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: 'user', content: prompt },
     ]
 
@@ -242,26 +242,25 @@ export async function analyzeCall(params: {
 
     await logApiCall({
       call_id: params.callId,
-      service: 'groq_llm',
+      service: 'openai_llm',
       duration_ms: duration,
       status_code: 200,
       tokens_used: tokensUsed,
     })
 
-    // First parse attempt
     const parsed = JSON.parse(rawResponse)
     return AnalysisSchema.parse(parsed)
   } catch (err: any) {
     const status = err?.status ?? err?.statusCode ?? 500
     if (status === 429) {
-      await logApiCall({ call_id: params.callId, service: 'groq_llm', duration_ms: Date.now() - start, status_code: 429, error: 'rate_limit' })
-      throw new GroqRateLimitError()
+      await logApiCall({ call_id: params.callId, service: 'openai_llm', duration_ms: Date.now() - start, status_code: 429, error: 'rate_limit' })
+      throw new RateLimitError()
     }
 
     // Schema parse failure — retry once with a stricter prompt
     if (err?.name === 'ZodError' || err instanceof SyntaxError) {
       try {
-        const retryMessages: Groq.Chat.ChatCompletionMessageParam[] = [
+        const retryMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
           { role: 'user', content: prompt },
           { role: 'assistant', content: rawResponse },
           {
@@ -277,7 +276,7 @@ export async function analyzeCall(params: {
 
         await logApiCall({
           call_id: params.callId,
-          service: 'groq_llm',
+          service: 'openai_llm',
           duration_ms: retryDuration,
           status_code: 200,
           tokens_used: retryCompletion.usage?.total_tokens ?? null,
@@ -286,12 +285,12 @@ export async function analyzeCall(params: {
         return AnalysisSchema.parse(JSON.parse(retryRaw))
       } catch (retryErr: any) {
         const retryStatus = retryErr?.status ?? 500
-        await logApiCall({ call_id: params.callId, service: 'groq_llm', duration_ms: Date.now() - start, status_code: retryStatus, error: retryErr?.message })
+        await logApiCall({ call_id: params.callId, service: 'openai_llm', duration_ms: Date.now() - start, status_code: retryStatus, error: retryErr?.message })
         throw new Error(`Analysis parse failed after retry: ${retryErr?.message}\nRaw: ${rawResponse}`)
       }
     }
 
-    await logApiCall({ call_id: params.callId, service: 'groq_llm', duration_ms: Date.now() - start, status_code: status, error: err?.message })
+    await logApiCall({ call_id: params.callId, service: 'openai_llm', duration_ms: Date.now() - start, status_code: status, error: err?.message })
     throw err
   }
 }
