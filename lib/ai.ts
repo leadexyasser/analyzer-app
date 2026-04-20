@@ -1,15 +1,19 @@
 import OpenAI from 'openai'
+import Groq from 'groq-sdk'
 import { createServiceClient } from '@/lib/supabase/server'
 import { AnalysisSchema } from '@/types/analysis'
 
 export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+export const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
-const WHISPER_MODEL = 'whisper-1'
+// Groq Whisper: ultra-fast transcription (~10x faster than OpenAI)
+const WHISPER_MODEL = 'whisper-large-v3-turbo'
+// OpenAI gpt-4o-mini: 200k TPM, reliable JSON output for analysis
 const LLM_MODEL = 'gpt-4o-mini'
 
 async function logApiCall(params: {
   call_id: string | null
-  service: 'openai_whisper' | 'openai_llm'
+  service: 'groq_whisper' | 'openai_llm'
   duration_ms: number
   status_code: number
   tokens_used?: number | null
@@ -49,7 +53,7 @@ export async function transcribeAudio(
 
   try {
     const file = new File([fileBuffer.buffer as ArrayBuffer], filename, { type: 'audio/mpeg' })
-    const response = await openai.audio.transcriptions.create({
+    const response = await groq.audio.transcriptions.create({
       file,
       model: WHISPER_MODEL,
       response_format: 'verbose_json',
@@ -57,7 +61,7 @@ export async function transcribeAudio(
     })
 
     const duration = Date.now() - start
-    await logApiCall({ call_id: callId, service: 'openai_whisper', duration_ms: duration, status_code: 200 })
+    await logApiCall({ call_id: callId, service: 'groq_whisper', duration_ms: duration, status_code: 200 })
 
     const segments = (response as any).segments ?? []
     return { text: (response as any).text ?? '', segments }
@@ -67,7 +71,7 @@ export async function transcribeAudio(
 
     await logApiCall({
       call_id: callId,
-      service: 'openai_whisper',
+      service: 'groq_whisper',
       duration_ms: duration,
       status_code: status,
       error: err?.message,
