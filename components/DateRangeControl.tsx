@@ -4,10 +4,11 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 
 const PRESETS = [
-  { label: 'Today', days: 0 },
-  { label: '7d',    days: 7 },
-  { label: '30d',   days: 30 },
-  { label: '90d',   days: 90 },
+  { label: 'Today',     days: 0 },
+  { label: 'Yesterday', days: 0 },
+  { label: '7d',        days: 7 },
+  { label: '30d',       days: 30 },
+  { label: '90d',       days: 90 },
 ]
 
 const inputStyle: React.CSSProperties = {

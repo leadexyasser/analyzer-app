@@ -26,6 +26,11 @@ function resolveRange(preset: string, from: string, to: string): { start: Date; 
     const start = new Date(now); start.setHours(0,0,0,0)
     return { start, end, label: 'Today' }
   }
+  if (preset === 'Yesterday') {
+    const start = new Date(now); start.setDate(start.getDate() - 1); start.setHours(0,0,0,0)
+    const yEnd  = new Date(now); yEnd.setDate(yEnd.getDate() - 1);   yEnd.setHours(23,59,59,999)
+    return { start, end: yEnd, label: 'Yesterday' }
+  }
   const days = preset === '30d' ? 30 : preset === '90d' ? 90 : 7
   const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
   return { start, end, label: `Last ${days} days` }
