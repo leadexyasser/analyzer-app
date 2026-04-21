@@ -217,7 +217,8 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                         <p className="text-xs mt-0.5" style={{ color: 'var(--rb-text-3)' }}>{fe.qualifier_summary}</p>
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-1.5 text-right">
+                    <div className="flex items-center flex-wrap gap-1.5 text-right">
+                      <ReanalyzeButton callId={call.id!} size="sm" />
                       {qualFlags.map((f, i) => (
                         <span key={i} className="text-[10px] px-2 py-0.5 rounded" style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}>{f as string}</span>
                       ))}

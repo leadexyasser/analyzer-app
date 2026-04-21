@@ -8,6 +8,7 @@ import { Timeline } from '@/components/Timeline'
 import { SummaryTable } from '@/components/SummaryTable'
 import { DateRangeControl } from '@/components/DateRangeControl'
 import { AutoRefresh } from '@/components/AutoRefresh'
+import { ReanalyzeAllButton } from '@/components/ReanalyzeAllButton'
 import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from '@/lib/fe-scoring'
 import { Suspense } from 'react'
 
@@ -171,6 +172,7 @@ export default async function DashboardPage({
             <DateRangeControl />
           </Suspense>
           <AutoRefresh />
+          <ReanalyzeAllButton dateFrom={start.toISOString()} dateTo={end.toISOString()} />
           <RetryStuckButton />
         </div>
       </div>
