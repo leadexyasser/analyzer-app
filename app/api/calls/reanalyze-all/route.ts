@@ -16,8 +16,8 @@ export async function POST(request: NextRequest) {
     .eq('status', 'complete')
     .not('transcript_text', 'is', null)
 
-  if (from) query = query.gte('received_at', from)
-  if (to)   query = query.lte('received_at', to)
+  if (from) query = query.gte('call_started_at', from)
+  if (to)   query = query.lte('call_started_at', to)
 
   const { data: calls, error } = await query
 

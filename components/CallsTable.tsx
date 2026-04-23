@@ -822,7 +822,7 @@ export function CallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo: str
                           boxShadow: '2px 0 4px rgba(0,0,0,0.3)',
                         }}
                       >
-                        {fmt(call.received_at ?? null)}
+                        {fmt(call.call_started_at ?? call.received_at ?? null)}
                       </td>
                       <td className="px-3 py-3 max-w-[100px]">
                         <span className="text-xs truncate block" style={{ color: 'var(--rb-text-2)' }}>{call.publisher_name ?? '—'}</span>

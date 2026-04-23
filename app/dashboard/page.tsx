@@ -40,11 +40,11 @@ async function getStats(start: Date, end: Date) {
   const todayStart = etMidnight(etTodayStr())
 
   const [todayRes, revenueRes, analysisRes, todayCallsRes, allRes] = await Promise.all([
-    supabase.from('calls').select('id', { count: 'exact', head: true }).gte('received_at', todayStart.toISOString()),
-    supabase.from('calls').select('revenue').gte('received_at', start.toISOString()).lte('received_at', end.toISOString()).eq('status', 'complete').not('revenue', 'is', null),
-    supabase.from('calls').select('analysis, target_name, revenue').gte('received_at', start.toISOString()).lte('received_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null),
-    supabase.from('calls').select('received_at').gte('received_at', todayStart.toISOString()),
-    supabase.from('calls').select('campaign_name,publisher_name,status,revenue,payout,is_duplicate,quality_score').gte('received_at', start.toISOString()).lte('received_at', end.toISOString()),
+    supabase.from('calls').select('id', { count: 'exact', head: true }).gte('call_started_at', todayStart.toISOString()),
+    supabase.from('calls').select('revenue').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('revenue', 'is', null),
+    supabase.from('calls').select('analysis, target_name, revenue').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null),
+    supabase.from('calls').select('call_started_at').gte('call_started_at', todayStart.toISOString()),
+    supabase.from('calls').select('campaign_name,publisher_name,status,revenue,payout,is_duplicate,quality_score').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()),
   ])
 
   const callsToday = todayRes.count ?? 0
@@ -103,7 +103,7 @@ async function getStats(start: Date, end: Date) {
 
   const hourly = Array(24).fill(0)
   for (const row of todayCallsRes.data ?? []) {
-    const h = etHourOf(row.received_at)
+    const h = etHourOf(row.call_started_at)
     hourly[h] = (hourly[h] ?? 0) + 1
   }
 

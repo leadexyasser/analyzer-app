@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       'id,ringba_call_id,received_at,call_started_at,duration_seconds,caller_id,target_number,campaign_name,campaign_id,buyer_name,publisher_name,target_id,target_name,end_call_source,is_duplicate,revenue,payout,quality_score,flags,analysis,status,error_message',
       { count: 'exact' }
     )
-    .order('received_at', { ascending: false })
+    .order('call_started_at', { ascending: false })
     .range(offset, offset + limit - 1)
 
   if (status) query = query.eq('status', status)
@@ -46,8 +46,8 @@ export async function GET(request: NextRequest) {
   if (flags?.length) query = query.overlaps('flags', flags)
   if (minScore) query = query.gte('quality_score', Number(minScore))
   if (maxScore) query = query.lte('quality_score', Number(maxScore))
-  if (from) query = query.gte('received_at', from)
-  if (to) query = query.lte('received_at', to)
+  if (from) query = query.gte('call_started_at', from)
+  if (to) query = query.lte('call_started_at', to)
   if (leadVerdict) query = (query as any).eq('analysis->>lead_intent->>verdict', leadVerdict)
 
   const { data, count, error } = await query
