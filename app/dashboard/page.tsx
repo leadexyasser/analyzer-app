@@ -10,35 +10,33 @@ import { DateRangeControl } from '@/components/DateRangeControl'
 import { AutoRefresh } from '@/components/AutoRefresh'
 import { ReanalyzeAllButton } from '@/components/ReanalyzeAllButton'
 import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from '@/lib/fe-scoring'
+import { etTodayStr, etMidnight, etEndOfDay, shiftDateStr, etHourOf } from '@/lib/time'
 import { Suspense } from 'react'
 
 function resolveRange(preset: string, from: string, to: string): { start: Date; end: Date; label: string } {
-  const now = new Date()
-  const end = new Date(now)
-  end.setHours(23, 59, 59, 999)
+  const todayStr = etTodayStr()
 
   if (preset === 'custom' && (from || to)) {
-    const start = from ? new Date(from) : new Date(0)
-    const customEnd = to ? (() => { const d = new Date(to); d.setHours(23,59,59,999); return d })() : end
-    return { start, end: customEnd, label: `${from || '…'} → ${to || '…'}` }
+    const start = from ? etMidnight(from) : new Date(0)
+    const end   = to   ? etEndOfDay(to)   : etEndOfDay(todayStr)
+    return { start, end, label: `${from || '…'} → ${to || '…'}` }
   }
   if (preset === 'Today') {
-    const start = new Date(now); start.setHours(0,0,0,0)
-    return { start, end, label: 'Today' }
+    return { start: etMidnight(todayStr), end: etEndOfDay(todayStr), label: 'Today' }
   }
   if (preset === 'Yesterday') {
-    const start = new Date(now); start.setDate(start.getDate() - 1); start.setHours(0,0,0,0)
-    const yEnd  = new Date(now); yEnd.setDate(yEnd.getDate() - 1);   yEnd.setHours(23,59,59,999)
-    return { start, end: yEnd, label: 'Yesterday' }
+    const yStr = shiftDateStr(todayStr, -1)
+    return { start: etMidnight(yStr), end: etEndOfDay(yStr), label: 'Yesterday' }
   }
   const days = preset === '30d' ? 30 : preset === '90d' ? 90 : 7
-  const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const start = etMidnight(shiftDateStr(todayStr, -days))
+  const end   = etEndOfDay(todayStr)
   return { start, end, label: `Last ${days} days` }
 }
 
 async function getStats(start: Date, end: Date) {
   const supabase = createServiceClient()
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+  const todayStart = etMidnight(etTodayStr())
 
   const [todayRes, revenueRes, analysisRes, todayCallsRes, allRes] = await Promise.all([
     supabase.from('calls').select('id', { count: 'exact', head: true }).gte('received_at', todayStart.toISOString()),
@@ -104,7 +102,7 @@ async function getStats(start: Date, end: Date) {
 
   const hourly = Array(24).fill(0)
   for (const row of todayCallsRes.data ?? []) {
-    const h = new Date(row.received_at).getHours()
+    const h = etHourOf(row.received_at)
     hourly[h] = (hourly[h] ?? 0) + 1
   }
 
