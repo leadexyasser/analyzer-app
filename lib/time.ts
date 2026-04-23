@@ -17,14 +17,18 @@ export function etHourNow(): number {
  * on the given "YYYY-MM-DD" date string.
  */
 export function etMidnight(dateStr: string): Date {
-  // Probe noon UTC to determine the ET offset on that calendar day
+  // Probe noon UTC on that date, read back the ET hour via formatToParts
+  // (more reliable than parsing a formatted string)
   const probe = new Date(`${dateStr}T12:00:00Z`)
-  const etNoonHour = parseInt(
-    new Intl.DateTimeFormat('en-US', { timeZone: ET, hour: '2-digit', hour12: false }).format(probe)
-  )
-  // EDT = UTC-4 → etNoonHour = 8  → offset = 4
-  // EST = UTC-5 → etNoonHour = 7  → offset = 5
-  const offsetHours = 12 - etNoonHour
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: ET,
+    hour: 'numeric',
+    hour12: false,
+  }).formatToParts(probe)
+  const etHour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '8')
+  // EDT (UTC-4): noon UTC = 8 AM ET  → offset = 4
+  // EST (UTC-5): noon UTC = 7 AM ET  → offset = 5
+  const offsetHours = 12 - etHour
   return new Date(`${dateStr}T${String(offsetHours).padStart(2, '0')}:00:00.000Z`)
 }
 

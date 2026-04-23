@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 
+export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Dashboard' }
 import { CallsTable } from '@/components/CallsTable'
 import { RetryStuckButton } from '@/components/RetryStuckButton'
