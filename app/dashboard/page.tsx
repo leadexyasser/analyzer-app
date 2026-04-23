@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 30
 export const metadata: Metadata = { title: 'Dashboard' }
 import { CallsTable } from '@/components/CallsTable'
 import { RetryStuckButton } from '@/components/RetryStuckButton'
@@ -42,9 +42,10 @@ async function getStats(start: Date, end: Date) {
   const [todayRes, revenueRes, analysisRes, todayCallsRes, allRes] = await Promise.all([
     supabase.from('calls').select('id', { count: 'exact', head: true }).gte('call_started_at', todayStart.toISOString()),
     supabase.from('calls').select('revenue').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('revenue', 'is', null),
-    supabase.from('calls').select('analysis, target_name, revenue').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null),
+    // JSON path extraction: avoids pulling the full 5-10KB analysis blob per row
+    supabase.from('calls').select('target_name, revenue, analysis->call_outcome, analysis->final_expense').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null).limit(2000),
     supabase.from('calls').select('call_started_at').gte('call_started_at', todayStart.toISOString()),
-    supabase.from('calls').select('campaign_name,publisher_name,status,revenue,payout,is_duplicate,quality_score').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()),
+    supabase.from('calls').select('campaign_name,publisher_name,status,revenue,payout,is_duplicate,quality_score').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).limit(2000),
   ])
 
   const callsToday = todayRes.count ?? 0
@@ -60,11 +61,12 @@ async function getStats(start: Date, end: Date) {
   const targetMap = new Map<string, TRow>()
 
   for (const row of analysisRes.data ?? []) {
-    const analysis = row.analysis as any
-    const fe = analysis?.final_expense
-    const isClosed = analysis?.call_outcome === 'sale_closed'
-    const target = (row as any).target_name ?? '—'
-    const rev = (row as any).revenue != null ? Number((row as any).revenue) : 0
+    const r = row as any
+    // JSON path extraction returns call_outcome and final_expense as top-level fields
+    const fe = r.final_expense
+    const isClosed = r.call_outcome === 'sale_closed'
+    const target = r.target_name ?? '—'
+    const rev = r.revenue != null ? Number(r.revenue) : 0
 
     if (fe) {
       const score = computeFELeadQuality(fe)
@@ -152,35 +154,10 @@ function StatCard({ label, value, sub, accent = false, warn = false, green = fal
   )
 }
 
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string>>
-}) {
-  const sp = await searchParams
-  const preset = sp.preset ?? '7d'
-  const { start, end, label } = resolveRange(preset, sp.from ?? '', sp.to ?? '')
+async function DashboardStats({ start, end, label }: { start: Date; end: Date; label: string }) {
   const stats = await getStats(start, end)
-
   return (
-    <div className="space-y-5">
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-base font-semibold" style={{ color: 'var(--rb-text)' }}>Call Logs</h1>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--rb-text-3)' }}>Final Expense · {label}</p>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <Suspense>
-            <DateRangeControl />
-          </Suspense>
-          <AutoRefresh />
-          <ReanalyzeAllButton dateFrom={start.toISOString()} dateTo={end.toISOString()} />
-          <RetryStuckButton />
-        </div>
-      </div>
-
+    <>
       {/* Stats — Row 1: Business KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Calls Today" value={String(stats.callsToday)} />
@@ -199,26 +176,16 @@ export default async function DashboardPage({
         />
       </div>
 
-      {/* Null state — no analyzed data in range */}
       {stats.revenue === 0 && stats.closedRate === null && stats.avgFEQuality === null && (
-        <div
-          className="rounded-xl py-8 text-center"
-          style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}
-        >
+        <div className="rounded-xl py-8 text-center" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
           <p className="text-sm font-medium" style={{ color: 'var(--rb-text-2)' }}>No calls found for this date range</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--rb-text-3)' }}>
-            Try selecting a different period, or check that Ringba webhooks are configured.
-          </p>
+          <p className="text-xs mt-1" style={{ color: 'var(--rb-text-3)' }}>Try selecting a different period, or check that Ringba webhooks are configured.</p>
         </div>
       )}
 
       {/* Stats — Row 2: Quality indicators */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <StatCard
-          label="FE Lead Quality"
-          value={stats.avgFEQuality != null ? `${stats.avgFEQuality}%` : '—'}
-          sub="avg weighted qualifier score"
-        />
+        <StatCard label="FE Lead Quality" value={stats.avgFEQuality != null ? `${stats.avgFEQuality}%` : '—'} sub="avg weighted qualifier score" />
         <StatCard
           label="Compliance Score"
           value={stats.complianceScore != null ? `${stats.complianceScore}%` : '—'}
@@ -242,11 +209,61 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* Timeline */}
       <Timeline hourly={stats.hourly} />
-
-      {/* Summary breakdown */}
       <SummaryTable byCampaign={stats.byCampaign} byPublisher={stats.byPublisher} byTarget={stats.byTarget} />
+    </>
+  )
+}
+
+function Statsskeleton() {
+  return (
+    <div className="space-y-5 animate-pulse">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="rounded-xl px-5 py-4 h-20" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }} />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="rounded-xl px-5 py-4 h-20" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string>>
+}) {
+  const sp = await searchParams
+  const preset = sp.preset ?? '7d'
+  const { start, end, label } = resolveRange(preset, sp.from ?? '', sp.to ?? '')
+
+  return (
+    <div className="space-y-5">
+
+      {/* Header — renders instantly */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-base font-semibold" style={{ color: 'var(--rb-text)' }}>Call Logs</h1>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--rb-text-3)' }}>Final Expense · {label}</p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <Suspense>
+            <DateRangeControl />
+          </Suspense>
+          <AutoRefresh />
+          <ReanalyzeAllButton dateFrom={start.toISOString()} dateTo={end.toISOString()} />
+          <RetryStuckButton />
+        </div>
+      </div>
+
+      {/* Stats + Timeline + Summary — streamed in, shows skeleton while loading */}
+      <Suspense fallback={<Statsskeleton />}>
+        <DashboardStats start={start} end={end} label={label} />
+      </Suspense>
 
       {/* Call log */}
       <CallsTable dateFrom={start.toISOString()} dateTo={end.toISOString()} />
