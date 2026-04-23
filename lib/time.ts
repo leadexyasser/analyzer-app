@@ -1,4 +1,5 @@
-export const ET = 'America/New_York'
+// Fixed UTC-5 (EST) — no daylight saving flip
+export const ET = 'Etc/GMT+5'
 
 /** Today's date in ET as "YYYY-MM-DD" */
 export function etTodayStr(base = new Date()): string {

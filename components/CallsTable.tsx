@@ -15,7 +15,7 @@ import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from
 function fmt(date: string | null) {
   if (!date) return '—'
   return new Date(date).toLocaleString('en-US', {
-    timeZone: 'America/New_York',
+    timeZone: 'Etc/GMT+5',
     month: 'short', day: 'numeric', year: '2-digit',
     hour: 'numeric', minute: '2-digit', hour12: true,
   })

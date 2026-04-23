@@ -18,7 +18,7 @@ export function Timeline({ hourly }: Props) {
   const chartH = H - PAD_B - PAD_T
   const barW = Math.floor(chartW / 24) - 2
   const now = parseInt(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hour12: false }).format(new Date())
+    new Intl.DateTimeFormat('en-US', { timeZone: 'Etc/GMT+5', hour: '2-digit', hour12: false }).format(new Date())
   )
 
   const bars = useMemo(() =>
