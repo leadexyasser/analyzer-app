@@ -34,9 +34,9 @@ export const FinalExpenseQualifierSchema = z.object({
   interested_in_life_insurance: z.enum(['yes', 'no', 'unclear']),
   insurance_interest_notes: z.string().nullable(),
 
-  has_bank_account: z.enum(['yes', 'no', 'unclear']),
+  has_bank_account: z.enum(['yes', 'no', 'unclear', 'unknown']).transform((v): 'yes' | 'no' | 'unclear' => v === 'unknown' ? 'unclear' : v as 'yes' | 'no' | 'unclear'),
 
-  can_afford: z.enum(['yes', 'concerns', 'no', 'unclear']),
+  can_afford: z.enum(['yes', 'concerns', 'no', 'unclear', 'unknown']).transform((v): 'yes' | 'concerns' | 'no' | 'unclear' => v === 'unknown' ? 'unclear' : v as 'yes' | 'concerns' | 'no' | 'unclear'),
   affordability_notes: z.string().nullable(),
 
   // ── Compliance flags ─────────────────────────────────────────────────────

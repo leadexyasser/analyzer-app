@@ -35,6 +35,11 @@ export async function splitAudioIfNeeded(
     return [{ buffer, filename: originalFilename }]
   }
 
+  // ffmpeg-static binary is not available in serverless environments (e.g. Vercel)
+  if (!ffmpegPath) {
+    return [{ buffer, filename: originalFilename }]
+  }
+
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ringba-audio-'))
   const ext = path.extname(originalFilename) || '.mp3'
   const inputPath = path.join(tmpDir, `input${ext}`)
@@ -42,7 +47,6 @@ export async function splitAudioIfNeeded(
   try {
     await fs.writeFile(inputPath, buffer)
 
-    // Get duration via ffprobe-like approach using ffmpeg
     const durationSec = await getAudioDuration(inputPath)
     const numChunks = Math.ceil(buffer.byteLength / MAX_CHUNK_BYTES)
     const chunkDuration = Math.ceil(durationSec / numChunks)
@@ -62,14 +66,18 @@ export async function splitAudioIfNeeded(
       chunkPaths.push(chunkPath)
     }
 
-    const chunks = await Promise.all(
+    return await Promise.all(
       chunkPaths.map(async (p, i) => ({
         buffer: await fs.readFile(p),
         filename: `${path.basename(originalFilename, ext)}_chunk${i}${ext}`,
       }))
     )
-
-    return chunks
+  } catch (err: any) {
+    if (err?.code === 'ENOENT' || (err?.message ?? '').includes('ffmpeg')) {
+      console.warn('splitAudioIfNeeded: ffmpeg unavailable, sending oversized audio as single chunk')
+      return [{ buffer, filename: originalFilename }]
+    }
+    throw err
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true })
   }

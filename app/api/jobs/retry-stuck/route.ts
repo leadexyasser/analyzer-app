@@ -9,13 +9,22 @@ export async function POST(request: NextRequest) {
   const supabase = createServiceClient()
   const now = new Date().toISOString()
 
-  // Reset all stuck running/failed jobs back to queued
-  const { count: resetCount } = await supabase
+  // Reset all stuck/failed jobs back to queued (including permanently failed ones — bugs may have been fixed)
+  const { count: resetCount, data: resetJobs } = await supabase
     .from('processing_jobs')
-    .update({ status: 'queued', scheduled_for: now })
+    .update({ status: 'queued', scheduled_for: now, attempts: 0 })
     .in('status', ['running', 'failed'])
-    .lt('attempts', 3)
-    .select('id')
+    .select('call_id')
+
+  // Also un-fail the associated calls so they show as retrying
+  const failedCallIds = (resetJobs ?? []).map((j: any) => j.call_id).filter(Boolean)
+  if (failedCallIds.length > 0) {
+    await supabase
+      .from('calls')
+      .update({ status: 'pending', error_message: null })
+      .in('id', failedCallIds)
+      .eq('status', 'failed')
+  }
 
   // Also find calls that are pending/stuck with no queued job at all
   const { data: stuckCalls } = await supabase
