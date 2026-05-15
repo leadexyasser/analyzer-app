@@ -30,8 +30,15 @@ export async function POST(request: NextRequest) {
       const errMsg = err?.message ?? 'Unknown error'
       await markJobFailed(job.id, errMsg, job.attempts, isRateLimit)
 
-      if (!isRateLimit && (job.attempts + 1) >= 3) {
-        const supabase = createServiceClient()
+      const supabase = createServiceClient()
+      if (isRateLimit) {
+        // Don't leave the call stuck on 'analyzing'/'transcribing' between retries —
+        // drop it back to 'pending' so the dashboard reflects reality.
+        await supabase
+          .from('calls')
+          .update({ status: 'pending' })
+          .eq('id', job.call_id)
+      } else if ((job.attempts + 1) >= 3) {
         await supabase
           .from('calls')
           .update({ status: 'failed', error_message: errMsg })

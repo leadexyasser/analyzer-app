@@ -26,17 +26,34 @@ export async function dequeueJobs(limit = 3) {
     .eq('status', 'running')
     .lt('updated_at', staleThreshold)
 
-  const { data, error } = await supabase
+  // Cap analyze jobs at 1 per invocation: parallel gpt-4o calls trip OpenAI's TPM limit.
+  // download/transcribe are cheap and can still parallelize.
+  const { data: nonAnalyze, error: e1 } = await supabase
     .from('processing_jobs')
     .select('*, calls(*)')
     .eq('status', 'queued')
     .lte('scheduled_for', now)
+    .neq('job_type', 'analyze')
     .order('scheduled_for', { ascending: true })
     .limit(limit)
+  if (e1) throw new Error(`Failed to dequeue jobs: ${e1.message}`)
 
-  if (error) throw new Error(`Failed to dequeue jobs: ${error.message}`)
+  const remaining = limit - (nonAnalyze?.length ?? 0)
+  let analyze: any[] = []
+  if (remaining > 0) {
+    const { data, error: e2 } = await supabase
+      .from('processing_jobs')
+      .select('*, calls(*)')
+      .eq('status', 'queued')
+      .lte('scheduled_for', now)
+      .eq('job_type', 'analyze')
+      .order('scheduled_for', { ascending: true })
+      .limit(1)
+    if (e2) throw new Error(`Failed to dequeue analyze jobs: ${e2.message}`)
+    analyze = data ?? []
+  }
 
-  return data ?? []
+  return [...(nonAnalyze ?? []), ...analyze]
 }
 
 export async function markJobRunning(jobId: string) {
