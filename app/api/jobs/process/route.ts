@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { dequeueJobs, markJobRunning, markJobDone, markJobFailed, enqueueJob } from '@/lib/queue'
 import { downloadAudio } from '@/lib/audio'
@@ -9,15 +10,12 @@ export const runtime = 'nodejs'
 // 90s: transcribe job may poll AssemblyAI for ~50s on long calls; analyze adds another 5-15s
 export const maxDuration = 90
 
-export async function POST(request: NextRequest) {
-  const auth = request.headers.get('authorization')
-  if (!auth || auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+const BATCH_SIZE = 3
 
-  const jobs = await dequeueJobs(3)
+async function runWorker() {
+  const jobs = await dequeueJobs(BATCH_SIZE)
   if (jobs.length === 0) {
-    return NextResponse.json({ ok: true, processed: 0, message: 'No jobs queued' })
+    return { ok: true, processed: 0, message: 'No jobs queued' }
   }
 
   const results = await Promise.all(jobs.map(async (job) => {
@@ -33,12 +31,7 @@ export async function POST(request: NextRequest) {
 
       const supabase = createServiceClient()
       if (isRateLimit) {
-        // Don't leave the call stuck on 'analyzing'/'transcribing' between retries —
-        // drop it back to 'pending' so the dashboard reflects reality.
-        await supabase
-          .from('calls')
-          .update({ status: 'pending' })
-          .eq('id', job.call_id)
+        await supabase.from('calls').update({ status: 'pending' }).eq('id', job.call_id)
       } else if ((job.attempts + 1) >= 3) {
         await supabase
           .from('calls')
@@ -49,7 +42,43 @@ export async function POST(request: NextRequest) {
     }
   }))
 
-  return NextResponse.json({ ok: true, processed: jobs.length, results })
+  // If we filled the batch, more jobs are likely queued — chain a follow-up invocation
+  // in the background so bursts drain in seconds, not minutes.
+  if (jobs.length >= BATCH_SIZE) {
+    after(async () => {
+      const host =
+        process.env.NEXT_PUBLIC_APP_URL ??
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL
+          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+          : null)
+      if (!host || !process.env.CRON_SECRET) return
+      try {
+        await fetch(`${host}/api/jobs/process`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${process.env.CRON_SECRET}`, 'Content-Type': 'application/json' },
+        })
+      } catch {}
+    })
+  }
+
+  return { ok: true, processed: jobs.length, results }
+}
+
+function isAuthorized(request: NextRequest): boolean {
+  const auth = request.headers.get('authorization')
+  return auth === `Bearer ${process.env.CRON_SECRET}`
+}
+
+// Vercel Cron triggers via GET (with auto-injected Authorization: Bearer ${CRON_SECRET}).
+// Internal chain-calls and manual triggers use POST. Both paths share the same handler.
+export async function GET(request: NextRequest) {
+  if (!isAuthorized(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  return NextResponse.json(await runWorker())
+}
+
+export async function POST(request: NextRequest) {
+  if (!isAuthorized(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  return NextResponse.json(await runWorker())
 }
 
 async function processJob(job: any) {
