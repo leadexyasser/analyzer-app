@@ -14,19 +14,21 @@ export async function POST(
 
   const { data: call } = await supabase
     .from('calls')
-    .select('id, status, transcript_text')
+    .select('id, status, recording_storage_path')
     .eq('id', id)
     .single()
 
   if (!call) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (!call.transcript_text) return NextResponse.json({ error: 'No transcript — re-download the call instead' }, { status: 400 })
+  if (!call.recording_storage_path) return NextResponse.json({ error: 'No recording stored — cannot re-transcribe' }, { status: 400 })
 
-  // Delete old analyze jobs, queue a fresh one
-  await supabase.from('processing_jobs').delete().eq('call_id', id).eq('job_type', 'analyze')
-  await supabase.from('calls').update({ status: 'analyzing', error_message: null }).eq('id', id)
+  // Re-process from transcription onward so this call gets the AssemblyAI
+  // dual_channel pipeline. Just re-running analyze on old Whisper transcripts
+  // produces nearly identical results — the accuracy win is in the new transcription.
+  await supabase.from('processing_jobs').delete().eq('call_id', id).in('job_type', ['transcribe', 'analyze'])
+  await supabase.from('calls').update({ status: 'pending', error_message: null }).eq('id', id)
 
   const { enqueueJob } = await import('@/lib/queue')
-  await enqueueJob(id, 'analyze')
+  await enqueueJob(id, 'transcribe')
 
   // Kick off immediately
   after(async () => {

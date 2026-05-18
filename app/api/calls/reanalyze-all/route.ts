@@ -10,11 +10,14 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}))
   const { from, to } = body as { from?: string; to?: string }
 
+  // Re-process from transcription onward so existing calls get the new AssemblyAI
+  // dual_channel pipeline (with definitive AGENT/CALLER speaker labels). Just re-running
+  // the LLM analyze step on old Whisper transcripts produces nearly identical results —
+  // the accuracy win lives in the channel-separated transcription.
   let query = supabase
     .from('calls')
-    .select('id')
-    .eq('status', 'complete')
-    .not('transcript_text', 'is', null)
+    .select('id, recording_storage_path')
+    .not('recording_storage_path', 'is', null)
 
   if (from) query = query.gte('call_started_at', from)
   if (to)   query = query.lte('call_started_at', to)
@@ -26,13 +29,13 @@ export async function POST(request: NextRequest) {
 
   const ids = calls.map(c => c.id)
 
-  // Delete stale analyze jobs and reset status
-  await supabase.from('processing_jobs').delete().in('call_id', ids).eq('job_type', 'analyze')
-  await supabase.from('calls').update({ status: 'analyzing', error_message: null }).in('id', ids)
+  // Wipe stale jobs for both stages so the new transcribe runs cleanly.
+  await supabase.from('processing_jobs').delete().in('call_id', ids).in('job_type', ['transcribe', 'analyze'])
+  await supabase.from('calls').update({ status: 'pending', error_message: null }).in('id', ids)
 
   for (const id of ids) {
-    await enqueueJob(id, 'analyze')
+    await enqueueJob(id, 'transcribe')
   }
 
-  return NextResponse.json({ ok: true, queued: ids.length })
+  return NextResponse.json({ ok: true, queued: ids.length, message: 'Re-transcribing via AssemblyAI then re-analyzing' })
 }
