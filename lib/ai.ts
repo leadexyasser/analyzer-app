@@ -1,19 +1,25 @@
 import OpenAI from 'openai'
-import Groq from 'groq-sdk'
 import { createServiceClient } from '@/lib/supabase/server'
 import { AnalysisSchema } from '@/types/analysis'
 
 export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-export const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
-// Groq Whisper: ultra-fast transcription (~10x faster than OpenAI)
-const WHISPER_MODEL = 'whisper-large-v3-turbo'
-// OpenAI gpt-4o: best accuracy for nuanced call analysis
 const LLM_MODEL = 'gpt-4o'
+const ASSEMBLYAI_BASE = 'https://api.assemblyai.com/v2'
+const TRANSCRIPTION_MODEL = 'universal-3-pro'
+const POLL_INTERVAL_MS = 3000
+const POLL_MAX_ATTEMPTS = 16 // ~48s, well under 60s Vercel limit
+
+export class RateLimitError extends Error {
+  constructor() {
+    super('OpenAI rate limit exceeded (429)')
+    this.name = 'RateLimitError'
+  }
+}
 
 async function logApiCall(params: {
   call_id: string | null
-  service: 'groq_whisper' | 'openai_llm'
+  service: 'assemblyai' | 'openai_llm' | 'groq_whisper'
   duration_ms: number
   status_code: number
   tokens_used?: number | null
@@ -30,119 +36,208 @@ async function logApiCall(params: {
       error: params.error ?? null,
     })
   } catch {
-    // Non-critical — don't let logging failure break the pipeline
+    // Non-critical
   }
 }
 
-export class RateLimitError extends Error {
-  constructor() {
-    super('OpenAI rate limit exceeded (429)')
-    this.name = 'RateLimitError'
-  }
+export type Utterance = {
+  channel: '1' | '2'
+  start: number   // ms
+  end: number     // ms
+  text: string
+  confidence?: number
+}
+
+export type TranscriptionResult = {
+  text: string
+  utterances: Utterance[]
+  agent_channel: '1' | '2'
+  transcript_text: string         // AGENT/CALLER labeled, sorted by time
+  audio_duration: number | null   // seconds
+  language_code: string | null
 }
 
 export async function transcribeAudio(
   fileBuffer: Buffer,
   filename: string,
   callId: string | null = null
-): Promise<{
-  text: string
-  segments: Array<{ start: number; end: number; text: string }>
-}> {
+): Promise<TranscriptionResult> {
+  const apiKey = process.env.ASSEMBLYAI_API_KEY
+  if (!apiKey) throw new Error('ASSEMBLYAI_API_KEY not set')
+
   const start = Date.now()
 
-  try {
-    const file = new File([fileBuffer.buffer as ArrayBuffer], filename, { type: 'audio/mpeg' })
-    const response = await groq.audio.transcriptions.create({
-      file,
-      model: WHISPER_MODEL,
-      response_format: 'verbose_json',
-      timestamp_granularities: ['segment'],
-    })
-
-    const duration = Date.now() - start
-    await logApiCall({ call_id: callId, service: 'groq_whisper', duration_ms: duration, status_code: 200 })
-
-    const segments = (response as any).segments ?? []
-    return { text: (response as any).text ?? '', segments }
-  } catch (err: any) {
-    const duration = Date.now() - start
-    const status = err?.status ?? err?.statusCode ?? 500
-
-    await logApiCall({
-      call_id: callId,
-      service: 'groq_whisper',
-      duration_ms: duration,
-      status_code: status,
-      error: err?.message,
-    })
-
-    if (status === 429) throw new RateLimitError()
-    throw err
+  // 1. Upload audio bytes to AssemblyAI (returns a private CDN URL)
+  const uploadRes = await fetch(`${ASSEMBLYAI_BASE}/upload`, {
+    method: 'POST',
+    headers: { authorization: apiKey, 'content-type': 'application/octet-stream' },
+    body: fileBuffer as any,
+  })
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text()
+    await logApiCall({ call_id: callId, service: 'assemblyai', duration_ms: Date.now() - start, status_code: uploadRes.status, error: `upload: ${errText.slice(0, 200)}` })
+    throw new Error(`AssemblyAI upload failed: ${uploadRes.status} ${errText.slice(0, 200)}`)
   }
-}
+  const { upload_url } = await uploadRes.json()
 
-/**
- * Pseudo-speaker diarization via pause detection.
- * Whisper has no native diarization — we detect speaker turns
- * by treating gaps >1.5s between segments as a speaker change.
- * This is imperfect: overlapping speech, interruptions, and very
- * short segments may be mis-attributed. The LLM analysis prompt
- * explicitly notes this limitation.
- */
-export function buildSpeakerLabeledTranscript(
-  segments: Array<{ start: number; end: number; text: string }>
-): string {
-  if (segments.length === 0) return ''
+  // 2. Submit transcription with dual_channel (Ringba sends stereo: L=caller, R=agent)
+  const submitRes = await fetch(`${ASSEMBLYAI_BASE}/transcript`, {
+    method: 'POST',
+    headers: { authorization: apiKey, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      audio_url: upload_url,
+      dual_channel: true,
+      speech_models: [TRANSCRIPTION_MODEL],
+      punctuate: true,
+      format_text: true,
+      disfluencies: false,
+    }),
+  })
+  if (!submitRes.ok) {
+    const errText = await submitRes.text()
+    await logApiCall({ call_id: callId, service: 'assemblyai', duration_ms: Date.now() - start, status_code: submitRes.status, error: `submit: ${errText.slice(0, 200)}` })
+    throw new Error(`AssemblyAI submit failed: ${submitRes.status} ${errText.slice(0, 200)}`)
+  }
+  const submission = await submitRes.json()
+  const transcriptId = submission.id
 
-  const PAUSE_THRESHOLD_SEC = 1.5
-  let currentSpeaker = 'A'
-  let lastEnd = segments[0].end
-  const lines: string[] = []
-
-  for (const seg of segments) {
-    const gap = seg.start - lastEnd
-    if (gap > PAUSE_THRESHOLD_SEC) {
-      currentSpeaker = currentSpeaker === 'A' ? 'B' : 'A'
+  // 3. Poll until complete
+  let result: any = null
+  for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
+    const pollRes = await fetch(`${ASSEMBLYAI_BASE}/transcript/${transcriptId}`, {
+      headers: { authorization: apiKey },
+    })
+    if (!pollRes.ok) throw new Error(`AssemblyAI poll failed: ${pollRes.status}`)
+    const p = await pollRes.json()
+    if (p.status === 'completed') { result = p; break }
+    if (p.status === 'error') {
+      await logApiCall({ call_id: callId, service: 'assemblyai', duration_ms: Date.now() - start, status_code: 500, error: `transcription error: ${p.error}` })
+      throw new Error(`AssemblyAI transcription error: ${p.error}`)
     }
-    lines.push(`[${seg.start.toFixed(1)}s] Speaker ${currentSpeaker}: ${seg.text.trim()}`)
-    lastEnd = seg.end
+  }
+  if (!result) {
+    const elapsed = POLL_INTERVAL_MS * POLL_MAX_ATTEMPTS / 1000
+    await logApiCall({ call_id: callId, service: 'assemblyai', duration_ms: Date.now() - start, status_code: 504, error: `timeout after ${elapsed}s, transcript_id=${transcriptId}` })
+    throw new Error(`AssemblyAI timeout after ${elapsed}s — transcript_id=${transcriptId} may still finish; retry will pick it up`)
   }
 
-  return lines.join('\n')
+  const utterances: Utterance[] = (result.utterances ?? []).map((u: any) => ({
+    channel: String(u.channel) as '1' | '2',
+    start: u.start,
+    end: u.end,
+    text: u.text,
+    confidence: u.confidence,
+  }))
+
+  // 4. Identify which channel is the AGENT.
+  // For inbound Ringba calls, the agent always speaks first (the greeting).
+  // Tie-breaker: channel with more total spoken time = AGENT (script is longer than caller answers).
+  const agent_channel = identifyAgentChannel(utterances)
+
+  // 5. Build human-readable transcript with AGENT/CALLER labels
+  const transcript_text = buildChannelLabeledTranscript(utterances, agent_channel)
+
+  await logApiCall({
+    call_id: callId,
+    service: 'assemblyai',
+    duration_ms: Date.now() - start,
+    status_code: 200,
+  })
+
+  return {
+    text: result.text ?? '',
+    utterances,
+    agent_channel,
+    transcript_text,
+    audio_duration: result.audio_duration ?? null,
+    language_code: result.language_code ?? null,
+  }
 }
 
-const ANALYSIS_PROMPT_TEMPLATE = `You are an expert call quality analyst for a FINAL EXPENSE life insurance business. All calls are INBOUND — callers dialed in after seeing an advertisement. Your job is to extract accurate call quality metrics and compliance signals. Be precise: only flag something if you have clear evidence in the transcript.
+function identifyAgentChannel(utterances: Utterance[]): '1' | '2' {
+  if (utterances.length === 0) return '2' // arbitrary default; transcript is empty anyway
+
+  // Primary signal: whoever speaks first is the agent (inbound calls — agent answers)
+  const sorted = [...utterances].sort((a, b) => a.start - b.start)
+  const firstSpeaker = sorted[0].channel
+
+  // Sanity check via total talk time. If the "first speaker" actually talks 3x LESS than the other,
+  // something's off (e.g. caller said "hello?" before agent picked up audio) — fall back to talk-time.
+  const talkTime: Record<string, number> = { '1': 0, '2': 0 }
+  for (const u of utterances) talkTime[u.channel] += (u.end - u.start)
+
+  const other = firstSpeaker === '1' ? '2' : '1'
+  if (talkTime[firstSpeaker] * 3 < talkTime[other]) {
+    return other as '1' | '2'
+  }
+  return firstSpeaker
+}
+
+function buildChannelLabeledTranscript(utterances: Utterance[], agent_channel: '1' | '2'): string {
+  const sorted = [...utterances].sort((a, b) => a.start - b.start)
+  return sorted
+    .map(u => {
+      const role = u.channel === agent_channel ? 'AGENT' : 'CALLER'
+      const sec = (u.start / 1000).toFixed(1)
+      return `[${sec}s] ${role}: ${u.text.trim()}`
+    })
+    .join('\n')
+}
+
+const ANALYSIS_PROMPT_TEMPLATE = `You are an expert call quality analyst for a FINAL EXPENSE life insurance business. All calls are INBOUND — callers dialed in after seeing an advertisement.
+
+CRITICAL: The transcript below uses CHANNEL-SEPARATED speaker labels. AGENT and CALLER are determined from the stereo recording's left/right channels, not guessed from context. Trust the labels — they are FACT, not inference.
 
 CORE RULES:
 1. Output ONLY valid JSON. No markdown, no code fences, no text before or after.
 2. Every field is required. Use null or empty array if unknown — never omit a field.
-3. Speakers labeled "Speaker A" / "Speaker B" via pause detection (imperfect). Infer agent vs caller from context — the agent asks qualifying questions, follows a script, uses insurance terminology.
-4. Base every field ONLY on what is explicitly said. Do not infer or assume.
-5. When in doubt about a compliance flag — do NOT trigger it. Only flag with clear, direct evidence.
+3. Base every field ONLY on what is explicitly said. Do not infer or assume.
+4. When in doubt about a compliance flag — do NOT trigger it. Only flag with clear, direct evidence.
+5. The speaker who said something matters: a compliance issue spoken by the AGENT is far more severe than the CALLER mentioning the same words in a question or complaint.
 
 CALL METADATA:
 - Campaign: {campaign_name}
 - Buyer/Target: {buyer_name}
 - Duration: {duration_seconds} seconds
-- Revenue: ${'{revenue}'}
+- Revenue: \${revenue}
 
-TRANSCRIPT:
+TRANSCRIPT (each line prefixed with [time] AGENT: or [time] CALLER:):
 {transcript_text}
 
---- FIELD DEFINITIONS (read carefully before filling) ---
+--- FIELD DEFINITIONS — READ BEFORE FILLING ---
 
-CALL OUTCOME — "sale_closed" requires ALL of: (a) agent collected payment method details (bank account/routing number, credit card number, or premium payment confirmed), AND (b) caller gave explicit verbal consent to enroll, AND (c) agent confirmed enrollment/approval. "transferred" = agent transferred to another line/closer. "qualified_no_transfer" = caller qualifies but wasn't transferred. Do not guess — use "unclear" if unsure.
+CALL OUTCOME — "sale_closed" requires ALL three:
+  (a) AGENT collected payment method details (bank routing/account, card number, premium payment) — verified by digits read on the call;
+  (b) CALLER gave explicit verbal consent to enroll;
+  (c) AGENT confirmed enrollment/approval.
+"transferred" = AGENT transferred caller to another line/closer. "qualified_no_transfer" = caller qualifies but wasn't transferred. Use "unclear" if unsure — never guess sale_closed.
 
-OUTBOUND_CALL_CLAIMED — TRUE only if the caller explicitly states that OUR company or agent called THEM first (e.g., "you called me", "someone from your company called me", "I got a call from you guys and I'm calling back"). FALSE for ALL of these (common false positives): "I was just on the phone", "it popped up on my phone", "I saw it on my phone", "I called in", "I'm calling about the ad", "I was on another call". The question is: did the caller accuse US of making an outbound call to them? Only flag if YES.
+OUTBOUND_CALL_CLAIMED — TRUE only if the CALLER explicitly claims OUR side called THEM first.
+  TRUE: "you called me", "someone from your company called me", "I got a call from you guys and I'm calling back".
+  FALSE (common false positives): "I was just on the phone", "it popped up on my phone", "I saw it on my phone", "I called in", "I'm calling about the ad", "I was on another call".
+  Anything said by the AGENT does NOT trigger this flag. The flag is exclusively about CALLER accusations of an outbound call from us.
 
-FREE_GOVERNMENT_MENTIONS — TRUE only if the ad, agent, or caller described the life insurance product as "free", "government-sponsored", "government program", "federally funded", or similar misleading framing. TRUE examples: "the ad said it was a free government benefit", "they said it's a government program". FALSE examples: agent mentions "government-issued ID", caller mentions "I'm on government assistance/SSI/disability" (those are income facts, not misleading claims about the product).
+FREE_GOVERNMENT_MENTIONS — TRUE only if the AGENT, or the CALLER quoting the ad, described the product as "free", "government-sponsored", "government program", "federally funded", or similar.
+  TRUE: AGENT says "this is a government program", CALLER says "the ad said it was a free government benefit".
+  FALSE: CALLER mentions being on SSI / disability / government assistance (those are income facts about the caller, not misleading claims about the product); AGENT mentions "government-issued ID" (verification step).
 
-MISLEADING_AD_MENTION — TRUE only if the caller explicitly says the advertisement misrepresented what was being offered. TRUE examples: "the ad said I'd get $50,000 for free", "it said no medical exam but now you're asking questions", "the ad said something different from what you're telling me". FALSE: caller being confused about insurance in general.
+MISLEADING_AD_MENTION — TRUE only if the CALLER explicitly says the advertisement misrepresented what was offered.
+  TRUE: CALLER says "the ad said I'd get \$50,000 for free", "it said no medical exam but you're asking questions", "the ad said something different from what you're telling me".
+  FALSE: CALLER generally confused about insurance; AGENT clarifying ad copy.
 
-SALE_CLOSED vs QUALIFIED_NO_TRANSFER — sale_closed = payment collected + enrollment confirmed. qualified_no_transfer = caller qualified but call ended without completing a sale or transfer.
+FTC_REGULATORY_MENTION — TRUE only if FTC, BBB, attorney general, lawyer, or "filing a complaint" mentioned by EITHER side.
 
-PAYMENT_INFO_COLLECTED — TRUE only if bank routing number, account number, or credit card details were actually collected/read on the call.
+SCAM_KEYWORDS_MENTIONED — TRUE only if the CALLER uses words like "scam", "fraud", "fake", "rip-off", "con", "deceived", "tricked". AGENT saying these words (e.g. reassuring "this isn't a scam") does NOT trigger.
+
+PAYMENT_INFO_COLLECTED — TRUE only if specific bank routing/account digits or full card number were actually spoken on the call (by either side).
+
+CALLER-only fields (use only CALLER lines):
+  - caller_stated_name, caller_location_state, intent_or_need, objections_raised, commitments_made, callback_requested
+  - age_mentioned, age_verdict
+  - interested_in_life_insurance — from CALLER's direct yes/no/maybe
+  - has_bank_account — yes only if CALLER explicitly confirmed bank/credit union/credit card; never inferred
+  - can_afford — concerns only if CALLER mentions fixed income, tight budget, or payment hesitation
 
 ---
 
@@ -151,7 +246,6 @@ Return this exact JSON structure:
 {
   "summary": "<2-3 sentences: who called, what they wanted, what happened, outcome>",
   "language": "<en | es | mixed | other>",
-  "agent_speaker": "<Speaker A | Speaker B | unclear>",
   "quality_score": <0-100>,
   "quality_breakdown": {
     "agent_professionalism": <0-10>,
@@ -165,42 +259,42 @@ Return this exact JSON structure:
     "score": <0-100, how well caller intent matches the campaign offer>,
     "verdict": "<qualified | borderline | unqualified | invalid>",
     "is_genuine_inquiry": <true if caller genuinely wanted life insurance>,
-    "intent_signals": ["<direct quotes showing genuine interest>"],
+    "intent_signals": ["<direct CALLER quotes showing genuine interest>"],
     "red_flags": ["<phrases suggesting misled caller, wrong product, bot, or fraud>"],
     "misalignment_reason": "<one sentence if intent doesn't match offer, otherwise null>"
   },
   "extracted_data": {
     "caller_stated_name": "<string or null>",
     "caller_location_state": "<2-letter state code or null>",
-    "intent_or_need": "<what the caller said they were looking for, or null>",
-    "objections_raised": ["<verbatim or close paraphrase of objections>"],
-    "commitments_made": ["<what caller agreed to>"],
-    "payment_info_collected": <boolean — true ONLY if routing/account/card digits collected>,
+    "intent_or_need": "<what the CALLER said they were looking for, or null>",
+    "objections_raised": ["<verbatim CALLER objections>"],
+    "commitments_made": ["<what CALLER agreed to>"],
+    "payment_info_collected": <boolean — true ONLY if routing/account/card digits actually read on call>,
     "callback_requested": <boolean>
   },
   "flags": ["<flag>"],
-  "flag_details": { "<flag>": "<one sentence with evidence from transcript>" },
+  "flag_details": { "<flag>": "<one sentence with verbatim evidence including speaker>" },
   "coaching_notes": "<1-2 sentences of specific, actionable coaching for the agent, or null>",
   "final_expense": {
-    "age_mentioned": <number if caller stated their age, otherwise null>,
+    "age_mentioned": <number if CALLER stated their age, otherwise null>,
     "age_verdict": "<good if 40-80 | borderline if 81-85 | bad if 86+ | unknown if not mentioned>",
-    "interested_in_life_insurance": "<yes | no | unclear — based on direct answer, not assumption>",
-    "insurance_interest_notes": "<exact quote, or null>",
-    "has_bank_account": "<yes | no | unclear — only yes if caller explicitly confirmed bank/credit union/credit card>",
-    "can_afford": "<yes | concerns | no | unclear — concerns only if caller mentioned fixed income, tight budget, or payment hesitation>",
-    "affordability_notes": "<exact quote about money/affordability, or null>",
-    "free_government_mentions": <boolean — see definition above, do NOT flag income assistance mentions>,
-    "free_government_quotes": ["<exact quotes — only populate if free_government_mentions is true>"],
-    "outbound_call_claimed": <boolean — see definition above, very high bar, do NOT flag 'it popped up' or 'I was on the phone'>,
-    "outbound_call_quote": "<exact quote — only populate if outbound_call_claimed is true, otherwise null>",
-    "ftc_regulatory_mention": <boolean — true only if FTC, BBB, attorney general, or filing a complaint mentioned>,
-    "ftc_quote": "<exact quote, or null>",
-    "scam_keywords_mentioned": <boolean — true only if words like scam, fraud, fake, rip-off, con, deceived, tricked explicitly used>,
-    "scam_quotes": ["<exact quotes — only populate if scam_keywords_mentioned is true>"],
-    "misleading_ad_mention": <boolean — see definition above, caller must explicitly say the ad misrepresented the offer>,
-    "misleading_quotes": ["<exact quotes — only populate if misleading_ad_mention is true>"],
+    "interested_in_life_insurance": "<yes | no | unclear>",
+    "insurance_interest_notes": "<exact CALLER quote, or null>",
+    "has_bank_account": "<yes | no | unclear>",
+    "can_afford": "<yes | concerns | no | unclear>",
+    "affordability_notes": "<exact CALLER quote about money/affordability, or null>",
+    "free_government_mentions": <boolean — see definition above>,
+    "free_government_quotes": ["<exact quotes (include speaker AGENT/CALLER prefix) — only if true>"],
+    "outbound_call_claimed": <boolean — see definition above; CALLER only>,
+    "outbound_call_quote": "<exact CALLER quote — only if true, otherwise null>",
+    "ftc_regulatory_mention": <boolean>,
+    "ftc_quote": "<exact quote with speaker prefix, or null>",
+    "scam_keywords_mentioned": <boolean — CALLER only>,
+    "scam_quotes": ["<exact CALLER quotes — only if true>"],
+    "misleading_ad_mention": <boolean — see definition above; CALLER only>,
+    "misleading_quotes": ["<exact CALLER quotes — only if true>"],
     "qualifier_score": <0-100. Start at 100. Deduct: age 86+ (-20), age unknown (-10), age 81-85 (-5), no insurance interest (-15), no bank account (-15), affordability concerns (-10), cannot afford (-20), free/govt mention (-30), outbound call claimed (-25), FTC/regulatory mention (-40), scam keywords (-35), misleading ad mention (-30). Minimum 0.>,
-    "qualifier_verdict": "<qualified if score>=70 and no compliance flags | borderline if score 40-69 and no compliance flags | compliance_risk if ANY compliance flag (free_government_mentions OR outbound_call_claimed OR ftc_regulatory_mention OR scam_keywords_mentioned OR misleading_ad_mention) is true | disqualified if score<40>",
+    "qualifier_verdict": "<qualified if score>=70 and no compliance flags | borderline if score 40-69 and no compliance flags | compliance_risk if ANY compliance flag is true | disqualified if score<40>",
     "qualifier_summary": "<1-2 sentences: lead quality verdict + single most important finding>"
   }
 }
@@ -210,13 +304,12 @@ Valid flags: agent_unprofessional, agent_script_deviation, caller_confused, call
 Scoring rules:
 - quality_score: professionalism 30%, engagement 20%, qualification completeness 30%, outcome clarity 20%
 - compliance_concern flag MUST be added whenever any compliance boolean is true; also lower quality_score significantly
-- lead_intent.score: 100 = caller explicitly wanted life insurance; 0 = completely wrong product, bot, or fraud
+- lead_intent.score: 100 = CALLER explicitly wanted life insurance; 0 = wrong product, bot, or fraud
 - Short call (<5 exchanges or <60 seconds): quality_score ≤20, call_outcome "hung_up_early" or "unclear", flags must include "insufficient_audio", all final_expense qualification fields = "unclear"/null/false/[]
 
 Return the JSON now.`
 
-// gpt-4o-mini has 128k context. Cap transcript at ~60k chars (~15k tokens)
-// to leave room for prompt + response, with generous headroom.
+// gpt-4o has 128k context. Cap transcript at ~60k chars (~15k tokens).
 const MAX_TRANSCRIPT_CHARS = 60_000
 
 export async function analyzeCall(params: {
@@ -278,7 +371,6 @@ export async function analyzeCall(params: {
       throw new RateLimitError()
     }
 
-    // Schema parse failure — retry once with a stricter prompt
     if (err?.name === 'ZodError' || err instanceof SyntaxError) {
       try {
         const retryMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [

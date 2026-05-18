@@ -14,6 +14,14 @@ const validAnalysis = {
   },
   call_outcome: 'transferred',
   outcome_confidence: 'high',
+  lead_intent: {
+    score: 80,
+    verdict: 'qualified',
+    is_genuine_inquiry: true,
+    intent_signals: ['Looking for cheaper auto insurance'],
+    red_flags: [],
+    misalignment_reason: null,
+  },
   extracted_data: {
     caller_stated_name: 'John Smith',
     caller_location_state: 'California',

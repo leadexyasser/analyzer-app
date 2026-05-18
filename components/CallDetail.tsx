@@ -238,7 +238,7 @@ export function CallDetail({ call, audioUrl }: Props) {
                 ? <TranscriptViewer
                     transcriptText={call.transcript_text}
                     segments={(call.transcript as any)?.segments ?? []}
-                    agentSpeaker={analysis?.agent_speaker}
+                    agentSpeaker={(analysis?.agent_speaker as 'Speaker A' | 'Speaker B' | 'unclear' | undefined) ?? undefined}
                     currentTime={currentTime}
                     onSeek={audioUrl ? handleSeek : undefined}
                   />

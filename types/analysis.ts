@@ -92,7 +92,8 @@ export const CallOutcomeEnum = z.enum([
 export const AnalysisSchema = z.object({
   summary: z.string(),
   language: z.enum(['en', 'es', 'mixed', 'other']),
-  agent_speaker: z.enum(['Speaker A', 'Speaker B', 'unclear']),
+  // agent_speaker removed — now determined by channel separation, not LLM inference
+  agent_speaker: z.enum(['Speaker A', 'Speaker B', 'AGENT', 'CALLER', 'unclear']).optional().nullable(),
   quality_score: z.number().int().min(0).max(100),
   quality_breakdown: QualityBreakdownSchema,
   call_outcome: CallOutcomeEnum,

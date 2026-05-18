@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { dequeueJobs, markJobRunning, markJobDone, markJobFailed, enqueueJob } from '@/lib/queue'
-import { downloadAudio, splitAudioIfNeeded } from '@/lib/audio'
+import { downloadAudio } from '@/lib/audio'
 import { uploadRecording } from '@/lib/storage'
-import { transcribeAudio, buildSpeakerLabeledTranscript, analyzeCall, RateLimitError } from '@/lib/ai'
+import { transcribeAudio, analyzeCall, RateLimitError } from '@/lib/ai'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// 90s: transcribe job may poll AssemblyAI for ~50s on long calls; analyze adds another 5-15s
+export const maxDuration = 90
 
 export async function POST(request: NextRequest) {
   const auth = request.headers.get('authorization')
@@ -81,22 +82,12 @@ async function handleDownload(call: any, supabase: any) {
 
   const buffer = await downloadAudio(call.recording_url_original)
   const filename = `recording_${call.ringba_call_id}.mp3`
-  const chunks = await splitAudioIfNeeded(buffer, filename)
-
-  // For chunked files, store the first chunk path — subsequent chunks handled during transcription
-  const storagePath = await uploadRecording(call.id, chunks[0].buffer, chunks[0].filename)
-
-  // If multiple chunks, store all additional chunks too
-  const allPaths = [storagePath]
-  for (let i = 1; i < chunks.length; i++) {
-    const p = await uploadRecording(call.id, chunks[i].buffer, chunks[i].filename)
-    allPaths.push(p)
-  }
+  const storagePath = await uploadRecording(call.id, buffer, filename)
 
   await supabase
     .from('calls')
     .update({
-      recording_storage_path: allPaths[0],
+      recording_storage_path: storagePath,
       status: 'pending',
     })
     .eq('id', call.id)
@@ -111,55 +102,40 @@ async function handleTranscribe(call: any, supabase: any) {
     throw new Error('No storage path for transcription')
   }
 
-  // List all chunks in storage for this call
-  const { data: files, error } = await supabase.storage
+  // Read recording from Supabase. List files in case an older call stored multiple chunks
+  // — we concat them in order so AssemblyAI sees one continuous stream.
+  const { data: files, error: listErr } = await supabase.storage
     .from('recordings')
     .list(`calls/${call.id}`)
+  if (listErr) throw new Error(`Storage list failed: ${listErr.message}`)
+  if (!files || files.length === 0) throw new Error('No recording files found in storage')
 
-  if (error) throw new Error(`Storage list failed: ${error.message}`)
-
-  const { createServiceClient: makeClient } = await import('@/lib/supabase/server')
-  const storageClient = makeClient()
-
-  let allSegments: Array<{ start: number; end: number; text: string }> = []
-  let fullText = ''
-  let timeOffset = 0
-
-  for (const file of (files ?? [])) {
-    const { data: fileData } = await storageClient.storage
+  const sortedFiles = [...files].sort((a, b) => a.name.localeCompare(b.name))
+  const buffers: Buffer[] = []
+  for (const file of sortedFiles) {
+    const { data: fileData } = await supabase.storage
       .from('recordings')
       .download(`calls/${call.id}/${file.name}`)
-
     if (!fileData) continue
-
     const arrayBuffer = await fileData.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-
-    const result = await transcribeAudio(buffer, file.name, call.id)
-
-    // Adjust segment timestamps for chunks
-    const adjustedSegments = result.segments.map((seg) => ({
-      start: seg.start + timeOffset,
-      end: seg.end + timeOffset,
-      text: seg.text,
-    }))
-
-    allSegments = [...allSegments, ...adjustedSegments]
-    fullText += (fullText ? ' ' : '') + result.text
-
-    // Advance offset by last segment end time
-    if (result.segments.length > 0) {
-      timeOffset = allSegments[allSegments.length - 1].end
-    }
+    buffers.push(Buffer.from(arrayBuffer))
   }
+  const combined = Buffer.concat(buffers)
+  const filename = sortedFiles[0].name
 
-  const transcript_text = buildSpeakerLabeledTranscript(allSegments)
+  const result = await transcribeAudio(combined, filename, call.id)
 
   await supabase
     .from('calls')
     .update({
-      transcript: { segments: allSegments, text: fullText },
-      transcript_text,
+      transcript: {
+        utterances: result.utterances,
+        text: result.text,
+        agent_channel: result.agent_channel,
+        audio_duration: result.audio_duration,
+        language_code: result.language_code,
+      },
+      transcript_text: result.transcript_text,
       status: 'pending',
     })
     .eq('id', call.id)
