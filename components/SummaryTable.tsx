@@ -18,6 +18,8 @@ interface TargetRow {
   closed: number
   revenue: number
   cpa: number | null
+  feScore: number | null
+  complianceScore: number | null
 }
 
 interface Props {
@@ -74,11 +76,24 @@ export function SummaryTable({ byCampaign, byPublisher, byTarget }: Props) {
     : null
 
   const targetTotals = tab === 'target'
-    ? byTarget.reduce((acc, r) => ({
-        incoming: acc.incoming + r.incoming,
-        closed: acc.closed + r.closed,
-        revenue: acc.revenue + r.revenue,
-      }), { incoming: 0, closed: 0, revenue: 0 })
+    ? (() => {
+        let incoming = 0, closed = 0, revenue = 0
+        // Volume-weighted averages for FE / compliance
+        let feSum = 0, feCount = 0
+        let compSum = 0, compCount = 0
+        for (const r of byTarget) {
+          incoming += r.incoming
+          closed += r.closed
+          revenue += r.revenue
+          if (r.feScore != null) { feSum += r.feScore; feCount++ }
+          if (r.complianceScore != null) { compSum += r.complianceScore; compCount++ }
+        }
+        return {
+          incoming, closed, revenue,
+          feScore: feCount > 0 ? Math.round(feSum / feCount) : null,
+          complianceScore: compCount > 0 ? Math.round(compSum / compCount) : null,
+        }
+      })()
     : null
 
   const TAB_LABELS: { key: Tab; label: string }[] = [
@@ -200,12 +215,14 @@ export function SummaryTable({ byCampaign, byPublisher, byTarget }: Props) {
                 <TH right>Close Rate</TH>
                 <TH right>Revenue Paid</TH>
                 <TH right>CPA</TH>
+                <TH right>FE Lead</TH>
+                <TH right>Compliance</TH>
               </tr>
             </thead>
             <tbody>
               {byTarget.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={8}>
                     <div className="flex flex-col items-center justify-center py-10 gap-2">
                       <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--rb-text-3)' }}>
                         <circle cx="14" cy="14" r="11" /><path d="M9 14h10M14 9v10" strokeLinecap="round" opacity=".4" />
@@ -245,6 +262,24 @@ export function SummaryTable({ byCampaign, byPublisher, byTarget }: Props) {
                             ? <span className="font-bold" style={{ color: 'var(--rb-text)' }}>${row.cpa.toFixed(0)}</span>
                             : <span style={{ color: 'var(--rb-text-3)' }}>—</span>}
                         </TD>
+                        <TD right>
+                          {row.feScore == null
+                            ? <span style={{ color: 'var(--rb-text-3)' }}>—</span>
+                            : <span className="font-bold" style={{
+                                color: row.feScore >= 70 ? 'var(--rb-green)'
+                                  : row.feScore >= 40 ? 'var(--rb-amber)'
+                                  : 'var(--rb-red)',
+                              }}>{row.feScore}</span>}
+                        </TD>
+                        <TD right>
+                          {row.complianceScore == null
+                            ? <span style={{ color: 'var(--rb-text-3)' }}>—</span>
+                            : <span className="font-bold" style={{
+                                color: row.complianceScore >= 90 ? 'var(--rb-green)'
+                                  : row.complianceScore >= 75 ? 'var(--rb-amber)'
+                                  : 'var(--rb-red)',
+                              }}>{row.complianceScore}%</span>}
+                        </TD>
                       </tr>
                     )
                   })}
@@ -259,6 +294,22 @@ export function SummaryTable({ byCampaign, byPublisher, byTarget }: Props) {
                       <td className="px-4 py-2.5 text-xs font-bold text-right" style={{ color: 'var(--rb-accent)' }}>{money(targetTotals.revenue)}</td>
                       <td className="px-4 py-2.5 text-xs font-bold text-right" style={{ color: 'var(--rb-text)' }}>
                         {targetTotals.closed > 0 ? `$${(targetTotals.revenue / targetTotals.closed).toFixed(0)}` : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs font-bold text-right" style={{
+                        color: targetTotals.feScore == null ? 'var(--rb-text-3)'
+                          : targetTotals.feScore >= 70 ? 'var(--rb-green)'
+                          : targetTotals.feScore >= 40 ? 'var(--rb-amber)'
+                          : 'var(--rb-red)',
+                      }}>
+                        {targetTotals.feScore == null ? '—' : targetTotals.feScore}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs font-bold text-right" style={{
+                        color: targetTotals.complianceScore == null ? 'var(--rb-text-3)'
+                          : targetTotals.complianceScore >= 90 ? 'var(--rb-green)'
+                          : targetTotals.complianceScore >= 75 ? 'var(--rb-amber)'
+                          : 'var(--rb-red)',
+                      }}>
+                        {targetTotals.complianceScore == null ? '—' : `${targetTotals.complianceScore}%`}
                       </td>
                     </tr>
                   )}

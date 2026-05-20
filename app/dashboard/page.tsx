@@ -57,7 +57,17 @@ async function getStats(start: Date, end: Date) {
   let closedCount = 0
   const totalAnalyzed = (analysisRes.data ?? []).length
 
-  type TRow = { name: string; incoming: number; closed: number; revenue: number }
+  type TRow = {
+    name: string
+    incoming: number
+    closed: number
+    revenue: number
+    // Running sums for per-target FE quality + compliance scoring
+    feScoreSum: number
+    feScoreCount: number
+    complianceTotal: number
+    complianceClean: number
+  }
   const targetMap = new Map<string, TRow>()
 
   for (const row of analysisRes.data ?? []) {
@@ -83,11 +93,26 @@ async function getStats(start: Date, end: Date) {
 
     if (isClosed) closedCount++
 
-    if (!targetMap.has(target)) targetMap.set(target, { name: target, incoming: 0, closed: 0, revenue: 0 })
+    if (!targetMap.has(target)) {
+      targetMap.set(target, {
+        name: target, incoming: 0, closed: 0, revenue: 0,
+        feScoreSum: 0, feScoreCount: 0,
+        complianceTotal: 0, complianceClean: 0,
+      })
+    }
     const t = targetMap.get(target)!
     t.incoming++
     t.revenue += rev
     if (isClosed) t.closed++
+    if (fe) {
+      const tScore = computeFELeadQuality(fe)
+      if (tScore !== null) {
+        t.feScoreSum += tScore
+        t.feScoreCount++
+      }
+      t.complianceTotal++
+      if (!hasComplianceIssue(fe)) t.complianceClean++
+    }
   }
 
   const avgFEQuality = feScores.length ? Math.round(feScores.reduce((a, b) => a + b, 0) / feScores.length) : null
@@ -100,7 +125,16 @@ async function getStats(start: Date, end: Date) {
     .map(([key, count]) => [COMPLIANCE_FLAG_LABELS[key] ?? key, count] as [string, number])
 
   const byTarget = [...targetMap.values()]
-    .map(t => ({ ...t, cpa: t.closed > 0 ? t.revenue / t.closed : null }))
+    .map(t => ({
+      name: t.name,
+      incoming: t.incoming,
+      closed: t.closed,
+      revenue: t.revenue,
+      cpa: t.closed > 0 ? t.revenue / t.closed : null,
+      feScore: t.feScoreCount > 0 ? Math.round(t.feScoreSum / t.feScoreCount) : null,
+      complianceScore: t.complianceTotal > 0 ? Math.round((t.complianceClean / t.complianceTotal) * 100) : null,
+      complianceTotal: t.complianceTotal,
+    }))
     .sort((a, b) => b.incoming - a.incoming)
 
   const hourly = Array(24).fill(0)
