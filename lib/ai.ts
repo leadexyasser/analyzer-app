@@ -228,7 +228,14 @@ MISLEADING_AD_MENTION — TRUE only if the CALLER explicitly says the advertisem
 
 FTC_REGULATORY_MENTION — TRUE only if FTC, BBB, attorney general, lawyer, or "filing a complaint" mentioned by EITHER side.
 
-SCAM_KEYWORDS_MENTIONED — TRUE only if the CALLER uses words like "scam", "fraud", "fake", "rip-off", "con", "deceived", "tricked". AGENT saying these words (e.g. reassuring "this isn't a scam") does NOT trigger.
+SCAM_KEYWORDS_MENTIONED — TRUE only if the CALLER directly ACCUSES this specific operation, agent, or company of being a scam, fraud, or deception. The bar is HIGH — the caller must be calling US or THIS call a scam.
+  TRUE examples: "This is a scam.", "You're scamming me.", "I think this company is fraud.", "You guys are running a con.", "I've been deceived by your ad."
+  FALSE (DO NOT trigger — these are normal protective behaviors, not compliance issues):
+    - General wariness about sharing personal info: "I don't give my social out, too many scams", "I'm afraid of fraud", "How do I know this isn't a scam?", "I'm worried about identity theft."
+    - Asking for legitimacy verification: "Are you real?", "Is this legitimate?", "Can I trust this?", "How do I know you're not fake?"
+    - Mentioning unrelated past scams: "I got scammed last year by another company", "There's so much fraud these days."
+    - Hesitation about giving bank/SSN info due to general scam fears.
+  A caller saying "scam" or "fraud" while expressing hesitation, fear, or caution is NOT a compliance flag — it's normal protective behavior when sharing sensitive information. The flag is reserved for callers who clearly state THIS operation is a scam. AGENT mentions of "scam" (e.g. reassuring "this isn't a scam") never trigger.
 
 PAYMENT_INFO_COLLECTED — TRUE only if specific bank routing/account digits or full card number were actually spoken on the call (by either side).
 
