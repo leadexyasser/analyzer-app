@@ -7,6 +7,7 @@ import { CallsTable } from '@/components/CallsTable'
 import { RetryStuckButton } from '@/components/RetryStuckButton'
 import { Timeline } from '@/components/Timeline'
 import { SummaryTable } from '@/components/SummaryTable'
+import { UtmBreakdown } from '@/components/UtmBreakdown'
 import { DateRangeControl } from '@/components/DateRangeControl'
 import { AutoRefresh } from '@/components/AutoRefresh'
 import { ReanalyzeAllButton } from '@/components/ReanalyzeAllButton'
@@ -45,7 +46,13 @@ async function getStats(start: Date, end: Date) {
     // JSON path extraction: avoids pulling the full 5-10KB analysis blob per row
     supabase.from('calls').select('target_name, revenue, analysis->call_outcome, analysis->final_expense').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null).limit(2000),
     supabase.from('calls').select('call_started_at').gte('call_started_at', todayStart.toISOString()),
-    supabase.from('calls').select('campaign_name,publisher_name,status,revenue,payout,is_duplicate,quality_score').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).limit(2000),
+    // Include metadata->utm_* (JSON path extraction) so UTM breakdown can be built from the same dataset.
+    // analysis->call_outcome is also pulled so we can count closed sales per UTM without re-querying.
+    supabase.from('calls').select(
+      'campaign_name,publisher_name,status,revenue,payout,is_duplicate,quality_score,' +
+      'metadata->utm_content,metadata->utm_source,metadata->utm_medium,metadata->utm_campaign,metadata->utm_id,' +
+      'analysis->call_outcome'
+    ).gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).limit(2000),
   ])
 
   const callsToday = todayRes.count ?? 0
@@ -147,7 +154,20 @@ async function getStats(start: Date, end: Date) {
   const campaignMap = new Map<string, SRow>()
   const publisherMap = new Map<string, SRow>()
 
-  for (const r of allRes.data ?? []) {
+  // UTM aggregations — same shape as campaign/publisher rows, plus closed sales count per UTM.
+  type UtmRow = SRow & { closed: number }
+  const utmMaps: Record<UtmTag, Map<string, UtmRow>> = {
+    utm_content:  new Map(),
+    utm_source:   new Map(),
+    utm_medium:   new Map(),
+    utm_campaign: new Map(),
+    utm_id:       new Map(),
+  }
+  const UTM_TAGS: UtmTag[] = ['utm_content', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_id']
+
+  // Supabase's inferred type for selects with multiple JSON path extractions devolves to a
+  // generic error type — cast to any[]; runtime fields are the requested ones.
+  for (const r of (allRes.data ?? []) as any[]) {
     const camp = r.campaign_name ?? '—'
     const pub  = r.publisher_name ?? '—'
     const rev  = r.revenue != null ? Number(r.revenue) : 0
@@ -161,7 +181,32 @@ async function getStats(start: Date, end: Date) {
       if (r.is_duplicate === true) row.duplicates++
       if (qs != null) row.avgQuality = row.avgQuality == null ? qs : Math.round((row.avgQuality + qs) / 2)
     }
+
+    // UTM rollups — JSON path extraction returns each utm_* as a top-level field on the row.
+    // Missing tags get bucketed as "(none)" so untagged traffic is visible, not invisible.
+    const ra = r as any
+    const utmValues: Record<UtmTag, string> = {
+      utm_content:  String(ra.utm_content  ?? '').trim() || '(none)',
+      utm_source:   String(ra.utm_source   ?? '').trim() || '(none)',
+      utm_medium:   String(ra.utm_medium   ?? '').trim() || '(none)',
+      utm_campaign: String(ra.utm_campaign ?? '').trim() || '(none)',
+      utm_id:       String(ra.utm_id       ?? '').trim() || '(none)',
+    }
+    const isClosed = ra.call_outcome === 'sale_closed'
+    for (const tag of UTM_TAGS) {
+      const key = utmValues[tag]
+      const map = utmMaps[tag]
+      if (!map.has(key)) map.set(key, { name: key, incoming: 0, completed: 0, revenue: 0, payout: 0, duplicates: 0, avgQuality: null, closed: 0 })
+      const row = map.get(key)!
+      row.incoming++
+      if (r.status === 'complete') { row.completed++; row.revenue += rev; row.payout += pay }
+      if (r.is_duplicate === true) row.duplicates++
+      if (qs != null) row.avgQuality = row.avgQuality == null ? qs : Math.round((row.avgQuality + qs) / 2)
+      if (isClosed) row.closed++
+    }
   }
+
+  const sortRows = (m: Map<string, UtmRow>) => [...m.values()].sort((a, b) => b.incoming - a.incoming)
 
   return {
     callsToday, revenue, avgFEQuality, complianceScore, complianceTotal,
@@ -169,8 +214,17 @@ async function getStats(start: Date, end: Date) {
     hourly, byTarget,
     byCampaign:  [...campaignMap.values()].sort((a, b) => b.incoming - a.incoming),
     byPublisher: [...publisherMap.values()].sort((a, b) => b.incoming - a.incoming),
+    byUtm: {
+      utm_content:  sortRows(utmMaps.utm_content),
+      utm_source:   sortRows(utmMaps.utm_source),
+      utm_medium:   sortRows(utmMaps.utm_medium),
+      utm_campaign: sortRows(utmMaps.utm_campaign),
+      utm_id:       sortRows(utmMaps.utm_id),
+    },
   }
 }
+
+type UtmTag = 'utm_content' | 'utm_source' | 'utm_medium' | 'utm_campaign' | 'utm_id'
 
 function StatCard({ label, value, sub, accent = false, warn = false, green = false }: {
   label: string; value: string; sub?: string; accent?: boolean; warn?: boolean; green?: boolean
@@ -245,6 +299,7 @@ async function DashboardStats({ start, end, label }: { start: Date; end: Date; l
 
       <Timeline hourly={stats.hourly} />
       <SummaryTable byCampaign={stats.byCampaign} byPublisher={stats.byPublisher} byTarget={stats.byTarget} />
+      <UtmBreakdown byUtm={stats.byUtm} />
     </>
   )
 }
