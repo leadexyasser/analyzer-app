@@ -624,7 +624,7 @@ function FiltersPanel({ filters, onChange, onReset }: {
 
 // ── main ─────────────────────────────────────────────────────────────────────
 
-export function CallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+export function CallsTable({ dateFrom, dateTo, publisherScope = '' }: { dateFrom: string; dateTo: string; publisherScope?: string }) {
   const [calls, setCalls] = useState<Partial<Call>[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -634,20 +634,21 @@ export function CallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo: str
   const [filters, setFilters] = useState<Filters>(EMPTY)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Reset to page 1 when the date range changes (user switches preset)
-  const prevRangeRef = useRef(`${dateFrom}|${dateTo}`)
+  // Reset to page 1 when the date range or publisher scope changes
+  const prevRangeRef = useRef(`${dateFrom}|${dateTo}|${publisherScope}`)
   useEffect(() => {
-    const key = `${dateFrom}|${dateTo}`
+    const key = `${dateFrom}|${dateTo}|${publisherScope}`
     if (key !== prevRangeRef.current) {
       prevRangeRef.current = key
       setPage(1)
       setFilters(EMPTY)
     }
-  }, [dateFrom, dateTo])
+  }, [dateFrom, dateTo, publisherScope])
 
-  const fetchCalls = useCallback(async (p: number, f: Filters, from: string, to: string) => {
+  const fetchCalls = useCallback(async (p: number, f: Filters, from: string, to: string, pubScope: string) => {
     setLoading(true)
     const params = new URLSearchParams({ page: String(p) })
+    if (pubScope) params.set('publisher_scope', pubScope)
     if (f.status) params.set('status', f.status)
     if (f.campaign) params.set('campaign', f.campaign)
     if (f.publisher) params.set('publisher', f.publisher)
@@ -670,9 +671,9 @@ export function CallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo: str
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => fetchCalls(page, filters, dateFrom, dateTo), 300)
+    debounceRef.current = setTimeout(() => fetchCalls(page, filters, dateFrom, dateTo, publisherScope), 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [page, filters, fetchCalls, dateFrom, dateTo])
+  }, [page, filters, fetchCalls, dateFrom, dateTo, publisherScope])
 
   const setFilter = (k: keyof Filters, v: string) => { setFilters(f => ({ ...f, [k]: v })); setPage(1) }
   const totalPages = Math.ceil(total / 50)

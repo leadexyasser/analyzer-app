@@ -14,6 +14,7 @@ import { ReanalyzeAllButton } from '@/components/ReanalyzeAllButton'
 import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from '@/lib/fe-scoring'
 import { etTodayStr, etMidnight, etEndOfDay, shiftDateStr, etHourOf } from '@/lib/time'
 import { Suspense } from 'react'
+import { PublisherSwitcher } from '@/components/PublisherSwitcher'
 
 function resolveRange(preset: string, from: string, to: string): { start: Date; end: Date; label: string } {
   const todayStr = etTodayStr()
@@ -36,23 +37,27 @@ function resolveRange(preset: string, from: string, to: string): { start: Date; 
   return { start, end, label: `Last ${days} days` }
 }
 
-async function getStats(start: Date, end: Date) {
+async function getStats(start: Date, end: Date, publisherScope: string) {
   const supabase = createServiceClient()
   const todayStart = etMidnight(etTodayStr())
 
+  function scope<T>(q: T): T {
+    return publisherScope ? (q as any).eq('publisher_name', publisherScope) : q
+  }
+
   const [todayRes, revenueRes, analysisRes, todayCallsRes, allRes] = await Promise.all([
-    supabase.from('calls').select('id', { count: 'exact', head: true }).gte('call_started_at', todayStart.toISOString()),
-    supabase.from('calls').select('revenue').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('revenue', 'is', null),
+    scope(supabase.from('calls').select('id', { count: 'exact', head: true })).gte('call_started_at', todayStart.toISOString()),
+    scope(supabase.from('calls').select('revenue')).gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('revenue', 'is', null),
     // JSON path extraction: avoids pulling the full 5-10KB analysis blob per row
-    supabase.from('calls').select('target_name, revenue, analysis->call_outcome, analysis->final_expense').gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null).limit(2000),
-    supabase.from('calls').select('call_started_at').gte('call_started_at', todayStart.toISOString()),
+    scope(supabase.from('calls').select('target_name, revenue, analysis->call_outcome, analysis->final_expense')).gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null).limit(2000),
+    scope(supabase.from('calls').select('call_started_at')).gte('call_started_at', todayStart.toISOString()),
     // Include metadata->utm_* (JSON path extraction) so UTM breakdown can be built from the same dataset.
     // analysis->call_outcome is also pulled so we can count closed sales per UTM without re-querying.
-    supabase.from('calls').select(
+    scope(supabase.from('calls').select(
       'campaign_name,publisher_name,status,revenue,payout,is_duplicate,quality_score,' +
       'metadata->utm_content,metadata->utm_source,metadata->utm_medium,metadata->utm_campaign,metadata->utm_id,' +
       'analysis->call_outcome'
-    ).gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).limit(2000),
+    )).gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).limit(2000),
   ])
 
   const callsToday = todayRes.count ?? 0
@@ -242,8 +247,8 @@ function StatCard({ label, value, sub, accent = false, warn = false, green = fal
   )
 }
 
-async function DashboardStats({ start, end, label }: { start: Date; end: Date; label: string }) {
-  const stats = await getStats(start, end)
+async function DashboardStats({ start, end, label, publisherScope }: { start: Date; end: Date; label: string; publisherScope: string }) {
+  const stats = await getStats(start, end, publisherScope)
   return (
     <>
       {/* Stats — Row 1: Business KPIs */}
@@ -328,6 +333,7 @@ export default async function DashboardPage({
 }) {
   const sp = await searchParams
   const preset = sp.preset ?? '7d'
+  const publisherScope = sp.publisher_scope ?? ''
   const { start, end, label } = resolveRange(preset, sp.from ?? '', sp.to ?? '')
 
   return (
@@ -341,6 +347,9 @@ export default async function DashboardPage({
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <Suspense>
+            <PublisherSwitcher />
+          </Suspense>
+          <Suspense>
             <DateRangeControl />
           </Suspense>
           <AutoRefresh />
@@ -351,11 +360,11 @@ export default async function DashboardPage({
 
       {/* Stats + Timeline + Summary — streamed in, shows skeleton while loading */}
       <Suspense fallback={<Statsskeleton />}>
-        <DashboardStats start={start} end={end} label={label} />
+        <DashboardStats start={start} end={end} label={label} publisherScope={publisherScope} />
       </Suspense>
 
       {/* Call log */}
-      <CallsTable dateFrom={start.toISOString()} dateTo={end.toISOString()} />
+      <CallsTable dateFrom={start.toISOString()} dateTo={end.toISOString()} publisherScope={publisherScope} />
     </div>
   )
 }

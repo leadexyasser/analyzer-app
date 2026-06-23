@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
   const limit = 50
   const offset = (page - 1) * limit
 
+  const publisherScope = searchParams.get('publisher_scope')
   const status = searchParams.get('status')
   const campaign = searchParams.get('campaign')
   const buyer = searchParams.get('buyer')
@@ -34,6 +35,7 @@ export async function GET(request: NextRequest) {
     .order('call_started_at', { ascending: false })
     .range(offset, offset + limit - 1)
 
+  if (publisherScope) query = query.eq('publisher_name', publisherScope)
   if (status) query = query.eq('status', status)
   if (campaign) query = query.ilike('campaign_name', `%${campaign}%`)
   if (buyer) query = query.ilike('buyer_name', `%${buyer}%`)
