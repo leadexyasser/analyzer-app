@@ -42,9 +42,12 @@ async function runWorker() {
     }
   }))
 
-  // If we filled the batch, more jobs are likely queued — chain a follow-up invocation
-  // in the background so bursts drain in seconds, not minutes.
-  if (jobs.length >= BATCH_SIZE) {
+  // Chain a follow-up invocation whenever we did real work. Since the queue caps
+  // analyze at 1 per invocation (Tier 1 OpenAI TPM constraint), a "full batch" can
+  // legitimately be just 1 analyze job. Chaining after any work drains bursts in
+  // seconds without waiting for the cron tick; idle invocations (jobs.length === 0)
+  // exit early above and never chain, so the loop stops naturally.
+  if (jobs.length >= 1) {
     after(async () => {
       const host =
         process.env.NEXT_PUBLIC_APP_URL ??
