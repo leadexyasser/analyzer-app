@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { enqueueJob } from '@/lib/queue'
+import { runWorker } from '@/lib/worker'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 90
 
 export async function POST(request: NextRequest) {
   const supabase = createServiceClient()
@@ -36,6 +38,9 @@ export async function POST(request: NextRequest) {
   for (const id of ids) {
     await enqueueJob(id, 'transcribe')
   }
+
+  // Drain in-process — no HTTP self-call required.
+  after(async () => { try { await runWorker() } catch {} })
 
   return NextResponse.json({ ok: true, queued: ids.length, message: 'Re-transcribing via AssemblyAI then re-analyzing' })
 }

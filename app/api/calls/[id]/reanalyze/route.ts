@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { after } from 'next/server'
+import { runWorker } from '@/lib/worker'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 90
 
 export async function POST(
   _request: NextRequest,
@@ -30,19 +31,8 @@ export async function POST(
   const { enqueueJob } = await import('@/lib/queue')
   await enqueueJob(id, 'transcribe')
 
-  // Kick off immediately
-  after(async () => {
-    const host =
-      process.env.NEXT_PUBLIC_APP_URL ??
-      (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null)
-    if (!host || !process.env.CRON_SECRET) return
-    try {
-      await fetch(`${host}/api/jobs/process`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
-      })
-    } catch {}
-  })
+  // Drain the queue in-process — no HTTP self-call, so this works regardless of cron health.
+  after(async () => { try { await runWorker() } catch {} })
 
   return NextResponse.json({ ok: true })
 }

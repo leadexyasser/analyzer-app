@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { after } from 'next/server'
+import { runWorker } from '@/lib/worker'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// 90s so the in-process worker drain after the reset can use its full 75s window.
+export const maxDuration = 90
 
 export async function POST(request: NextRequest) {
   const supabase = createServiceClient()
@@ -66,23 +68,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Kick off the worker immediately
-  after(async () => {
-    const host =
-      process.env.NEXT_PUBLIC_APP_URL ??
-      (process.env.VERCEL_PROJECT_PRODUCTION_URL
-        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-        : null)
-    if (!host || !process.env.CRON_SECRET) return
-    const headers = {
-      Authorization: `Bearer ${process.env.CRON_SECRET}`,
-      'Content-Type': 'application/json',
-    }
-    for (let i = 0; i < 3; i++) {
-      try { await fetch(`${host}/api/jobs/process`, { method: 'POST', headers }) } catch {}
-      if (i < 2) await new Promise(r => setTimeout(r, 2000))
-    }
-  })
+  // Drain the queue in-process after the response is sent — no HTTP self-call required,
+  // so this works even if NEXT_PUBLIC_APP_URL is unset or the cron mechanism is broken.
+  after(async () => { try { await runWorker() } catch {} })
 
   return NextResponse.json({ ok: true, reset: resetCount ?? 0, requeued })
 }

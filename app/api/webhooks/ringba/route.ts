@@ -2,9 +2,12 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { parseRingbaPayload, verifySignature } from '@/lib/ringba'
 import { enqueueJob } from '@/lib/queue'
+import { runWorker } from '@/lib/worker'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// 90s — the response goes back to Ringba quickly; the in-process worker drain
+// uses its full 75s window after `after()` schedules it.
+export const maxDuration = 90
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text()
@@ -101,26 +104,11 @@ export async function POST(request: NextRequest) {
   if (parsed.recording_url_original) {
     await enqueueJob(call.id, 'download')
 
-    // Immediately kick off processing in the background — don't wait for cron.
-    // after() runs after the 200 is sent to Ringba; 3 passes chain download→transcribe→analyze.
-    after(async () => {
-      const host =
-        process.env.NEXT_PUBLIC_APP_URL ??
-        (process.env.VERCEL_PROJECT_PRODUCTION_URL
-          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-          : null)
-      if (!host || !process.env.CRON_SECRET) return
-      const headers = {
-        Authorization: `Bearer ${process.env.CRON_SECRET}`,
-        'Content-Type': 'application/json',
-      }
-      for (let i = 0; i < 3; i++) {
-        try {
-          await fetch(`${host}/api/jobs/process`, { method: 'POST', headers })
-        } catch {}
-        if (i < 2) await new Promise(r => setTimeout(r, 2000))
-      }
-    })
+    // Drain the queue in-process after the 200 is sent to Ringba. No HTTP self-call —
+    // the previous pattern silently failed when NEXT_PUBLIC_APP_URL was unset, which
+    // is what kept calls stuck on pending. runWorker loops internally and processes
+    // download → transcribe → analyze in one Node invocation.
+    after(async () => { try { await runWorker() } catch {} })
   } else {
     // No recording — mark as failed with a clear message
     await supabase
