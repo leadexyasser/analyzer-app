@@ -12,8 +12,8 @@ export async function POST(request: NextRequest) {
 
   const values: unknown[] = []
   const conds: string[] = [`recording_storage_path IS NOT NULL`]
-  if (from) { values.push(from); conds.push(`call_started_at >= $${values.length}`) }
-  if (to)   { values.push(to);   conds.push(`call_started_at <= $${values.length}`) }
+  if (from) { values.push(from); conds.push(`call_started_at >= $${values.length}::timestamptz`) }
+  if (to)   { values.push(to);   conds.push(`call_started_at <= $${values.length}::timestamptz`) }
 
   const rows = await many<{ id: string }>(
     `SELECT id FROM calls WHERE ${conds.join(' AND ')}`,

@@ -56,8 +56,8 @@ export async function GET(request: NextRequest) {
   if (flags?.length)  add(`flags && ?::text[]`, flags)
   if (minScore)       add(`quality_score >= ?`, Number(minScore))
   if (maxScore)       add(`quality_score <= ?`, Number(maxScore))
-  if (from)           add(`call_started_at >= ?`, from)
-  if (to)             add(`call_started_at <= ?`, to)
+  if (from)           add(`call_started_at >= ?::timestamptz`, from)
+  if (to)             add(`call_started_at <= ?::timestamptz`, to)
   if (leadVerdict)    add(`analysis->'lead_intent'->>'verdict' = ?`, leadVerdict)
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''

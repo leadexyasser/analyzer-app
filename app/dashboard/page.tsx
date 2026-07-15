@@ -50,12 +50,12 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
   const [todayRes, revenueRes, analysisRes, todayCallsRes, allRes] = await Promise.all([
     one<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM calls
-       WHERE call_started_at >= $3${scopeSql}`,
+       WHERE call_started_at >= $3::timestamptz${scopeSql}`,
       params
     ),
     many<{ revenue: string | null }>(
       `SELECT revenue FROM calls
-       WHERE call_started_at >= $1 AND call_started_at <= $2
+       WHERE call_started_at >= $1::timestamptz AND call_started_at <= $2::timestamptz
          AND status = 'complete' AND revenue IS NOT NULL${scopeSql}`,
       params
     ),
@@ -64,14 +64,14 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
               analysis->>'call_outcome' AS call_outcome,
               analysis->'final_expense' AS final_expense
        FROM calls
-       WHERE call_started_at >= $1 AND call_started_at <= $2
+       WHERE call_started_at >= $1::timestamptz AND call_started_at <= $2::timestamptz
          AND status = 'complete' AND analysis IS NOT NULL${scopeSql}
        LIMIT 2000`,
       params
     ),
     many<{ call_started_at: string }>(
       `SELECT call_started_at::text AS call_started_at FROM calls
-       WHERE call_started_at >= $3${scopeSql}`,
+       WHERE call_started_at >= $3::timestamptz${scopeSql}`,
       params
     ),
     many<{
@@ -89,7 +89,7 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
               metadata->>'utm_id'       AS utm_id,
               analysis->>'call_outcome' AS call_outcome
        FROM calls
-       WHERE call_started_at >= $1 AND call_started_at <= $2${scopeSql}
+       WHERE call_started_at >= $1::timestamptz AND call_started_at <= $2::timestamptz${scopeSql}
        LIMIT 2000`,
       params
     ),

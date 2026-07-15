@@ -73,7 +73,7 @@ export async function deleteOldRecordings(retentionDays = 30): Promise<number> {
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000)
   const rows = await many<{ id: string; recording_storage_path: string }>(
     `SELECT id, recording_storage_path FROM calls
-     WHERE recording_storage_path IS NOT NULL AND received_at < $1`,
+     WHERE recording_storage_path IS NOT NULL AND received_at < $1::timestamptz`,
     [cutoff]
   )
   if (rows.length === 0) return 0
