@@ -42,22 +42,32 @@ function resolveRange(preset: string, from: string, to: string): { start: Date; 
 async function getStats(start: Date, end: Date, publisherScope: string) {
   const todayStart = etMidnight(etTodayStr())
 
-  // Params: $1=start, $2=end, $3=todayStart, $4=scope (only if scoped).
-  const scopeSql = publisherScope ? ` AND publisher_name = $4` : ''
-  const params: unknown[] = [start.toISOString(), end.toISOString(), todayStart.toISOString()]
-  if (publisherScope) params.push(publisherScope)
+  // Each query gets its own params array — pg's extended-protocol requires the sent param count
+  // to match the highest placeholder referenced in each SQL, so we can't share one array across
+  // queries that use different subsets.
+  const startIso = start.toISOString()
+  const endIso = end.toISOString()
+  const todayIso = todayStart.toISOString()
+
+  // Range-based queries: $1=start, $2=end, [$3=scope]
+  const rangeScopeSql = publisherScope ? ` AND publisher_name = $3` : ''
+  const rangeParams: unknown[] = publisherScope ? [startIso, endIso, publisherScope] : [startIso, endIso]
+
+  // Today-only queries: $1=todayStart, [$2=scope]
+  const todayScopeSql = publisherScope ? ` AND publisher_name = $2` : ''
+  const todayParams: unknown[] = publisherScope ? [todayIso, publisherScope] : [todayIso]
 
   const [todayRes, revenueRes, analysisRes, todayCallsRes, allRes] = await Promise.all([
     one<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM calls
-       WHERE call_started_at >= $3::timestamptz${scopeSql}`,
-      params
+       WHERE call_started_at >= $1::timestamptz${todayScopeSql}`,
+      todayParams
     ),
     many<{ revenue: string | null }>(
       `SELECT revenue FROM calls
        WHERE call_started_at >= $1::timestamptz AND call_started_at <= $2::timestamptz
-         AND status = 'complete' AND revenue IS NOT NULL${scopeSql}`,
-      params
+         AND status = 'complete' AND revenue IS NOT NULL${rangeScopeSql}`,
+      rangeParams
     ),
     many<{ target_name: string | null; revenue: string | null; call_outcome: string | null; final_expense: Record<string, unknown> | null }>(
       `SELECT target_name, revenue,
@@ -65,14 +75,14 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
               analysis->'final_expense' AS final_expense
        FROM calls
        WHERE call_started_at >= $1::timestamptz AND call_started_at <= $2::timestamptz
-         AND status = 'complete' AND analysis IS NOT NULL${scopeSql}
+         AND status = 'complete' AND analysis IS NOT NULL${rangeScopeSql}
        LIMIT 2000`,
-      params
+      rangeParams
     ),
     many<{ call_started_at: string }>(
       `SELECT call_started_at::text AS call_started_at FROM calls
-       WHERE call_started_at >= $3::timestamptz${scopeSql}`,
-      params
+       WHERE call_started_at >= $1::timestamptz${todayScopeSql}`,
+      todayParams
     ),
     many<{
       campaign_name: string | null; publisher_name: string | null; status: string;
@@ -89,9 +99,9 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
               metadata->>'utm_id'       AS utm_id,
               analysis->>'call_outcome' AS call_outcome
        FROM calls
-       WHERE call_started_at >= $1::timestamptz AND call_started_at <= $2::timestamptz${scopeSql}
+       WHERE call_started_at >= $1::timestamptz AND call_started_at <= $2::timestamptz${rangeScopeSql}
        LIMIT 2000`,
-      params
+      rangeParams
     ),
   ])
 
