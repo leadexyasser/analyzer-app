@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { one, query } from '@/lib/db'
 import { parseRingbaPayload, verifySignature } from '@/lib/ringba'
 import { enqueueJob } from '@/lib/queue'
 import { runWorker } from '@/lib/worker'
@@ -11,9 +11,7 @@ export const maxDuration = 90
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text()
-  const supabase = createServiceClient()
 
-  // Verify signature if secret is configured
   const secret = process.env.RINGBA_WEBHOOK_SECRET || null
   const signatureHeader = request.headers.get('x-ringba-signature') ?? request.headers.get('x-signature') ?? null
   const signature_valid = verifySignature(rawBody, signatureHeader, secret)
@@ -25,103 +23,97 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Log raw event first — before any processing
-  await supabase.from('webhook_events').insert({
-    payload: payload as Record<string, unknown>,
-    signature_valid: secret ? signature_valid : null,
-    processed: false,
-  })
+  // Log raw event first — before any processing.
+  await query(
+    `INSERT INTO webhook_events (payload, signature_valid, processed) VALUES ($1::jsonb, $2, false)`,
+    [JSON.stringify(payload), secret ? signature_valid : null]
+  )
 
   if (secret && !signature_valid) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
-  // Parse and extract fields
   let parsed: ReturnType<typeof parseRingbaPayload>
   try {
     parsed = parseRingbaPayload(payload)
-  } catch (err: any) {
-    return NextResponse.json({ error: `Parse error: ${err.message}` }, { status: 422 })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'unknown'
+    return NextResponse.json({ error: `Parse error: ${message}` }, { status: 422 })
   }
 
-  // Idempotency check — if call already exists, return 200 without reprocessing
-  const { data: existing } = await supabase
-    .from('calls')
-    .select('id, status')
-    .eq('ringba_call_id', parsed.ringba_call_id)
-    .maybeSingle()
-
+  // Idempotency check — if call already exists, return 200 without reprocessing.
+  const existing = await one<{ id: string; status: string }>(
+    `SELECT id, status FROM calls WHERE ringba_call_id = $1`,
+    [parsed.ringba_call_id]
+  )
   if (existing) {
     return NextResponse.json({ ok: true, duplicate: true, call_id: existing.id })
   }
 
-  // Duplicate detection: same inbound caller_id seen before (within 30 days)
+  // Duplicate detection: same inbound caller_id seen before (within 30 days).
   let is_duplicate = false
   if (parsed.caller_id) {
-    const windowStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-    const { data: priorCall } = await supabase
-      .from('calls')
-      .select('id')
-      .eq('caller_id', parsed.caller_id)
-      .gte('received_at', windowStart)
-      .limit(1)
-      .maybeSingle()
+    const priorCall = await one<{ id: string }>(
+      `SELECT id FROM calls
+       WHERE caller_id = $1
+         AND received_at >= now() - interval '30 days'
+       LIMIT 1`,
+      [parsed.caller_id]
+    )
     if (priorCall) is_duplicate = true
   }
 
-  // Insert call row
-  const { data: call, error: insertError } = await supabase
-    .from('calls')
-    .insert({
-      ringba_call_id: parsed.ringba_call_id,
-      call_started_at: parsed.call_started_at,
-      duration_seconds: parsed.duration_seconds,
-      caller_id: parsed.caller_id,
-      target_number: parsed.target_number,
-      campaign_name: parsed.campaign_name,
-      campaign_id: parsed.campaign_id,
-      buyer_name: parsed.buyer_name,
-      publisher_name: parsed.publisher_name,
-      target_id: parsed.target_id,
-      target_name: parsed.target_name,
-      end_call_source: parsed.end_call_source,
-      is_duplicate,
-      revenue: parsed.revenue,
-      payout: parsed.payout,
-      recording_url_original: parsed.recording_url_original,
-      metadata: Object.keys(parsed.metadata).length > 0 ? parsed.metadata : null,
-      status: 'pending',
-      processing_attempts: 0,
-    })
-    .select('id')
-    .single()
+  const metadata = Object.keys(parsed.metadata).length > 0 ? JSON.stringify(parsed.metadata) : null
 
-  if (insertError || !call) {
+  const call = await one<{ id: string }>(
+    `INSERT INTO calls (
+       ringba_call_id, call_started_at, duration_seconds, caller_id, target_number,
+       campaign_name, campaign_id, buyer_name, publisher_name, target_id, target_name,
+       end_call_source, is_duplicate, revenue, payout, recording_url_original, metadata,
+       status, processing_attempts
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, 'pending', 0)
+     RETURNING id`,
+    [
+      parsed.ringba_call_id,
+      parsed.call_started_at,
+      parsed.duration_seconds,
+      parsed.caller_id,
+      parsed.target_number,
+      parsed.campaign_name,
+      parsed.campaign_id,
+      parsed.buyer_name,
+      parsed.publisher_name,
+      parsed.target_id,
+      parsed.target_name,
+      parsed.end_call_source,
+      is_duplicate,
+      parsed.revenue,
+      parsed.payout,
+      parsed.recording_url_original,
+      metadata,
+    ]
+  )
+
+  if (!call) {
     return NextResponse.json({ error: 'DB insert failed' }, { status: 500 })
   }
 
-  // Enqueue download job if there's a recording URL
   if (parsed.recording_url_original) {
     await enqueueJob(call.id, 'download')
-
-    // Drain the queue in-process after the 200 is sent to Ringba. No HTTP self-call —
-    // the previous pattern silently failed when NEXT_PUBLIC_APP_URL was unset, which
-    // is what kept calls stuck on pending. runWorker loops internally and processes
-    // download → transcribe → analyze in one Node invocation.
+    // Drain in-process after the 200 is sent to Ringba.
     after(async () => { try { await runWorker() } catch {} })
   } else {
-    // No recording — mark as failed with a clear message
-    await supabase
-      .from('calls')
-      .update({ status: 'failed', error_message: 'No recording URL in payload' })
-      .eq('id', call.id)
+    await query(
+      `UPDATE calls SET status = 'failed', error_message = 'No recording URL in payload' WHERE id = $1`,
+      [call.id]
+    )
   }
 
-  // Mark webhook event as processed
-  await supabase
-    .from('webhook_events')
-    .update({ processed: true })
-    .eq('payload->>call_id', parsed.ringba_call_id)
+  await query(
+    `UPDATE webhook_events SET processed = true WHERE payload->>'call_id' = $1`,
+    [parsed.ringba_call_id]
+  )
 
   return NextResponse.json({ ok: true, call_id: call.id })
 }

@@ -1,27 +1,18 @@
 import { NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { many } from '@/lib/db'
 
 export const runtime = 'nodejs'
 
 export async function GET() {
-  const supabase = createServiceClient()
-
-  const { data, error } = await supabase
-    .from('calls')
-    .select('publisher_name')
-    .limit(5000)
-
-  if (error || !data) {
+  try {
+    const rows = await many<{ publisher_name: string }>(
+      `SELECT DISTINCT publisher_name
+       FROM calls
+       WHERE publisher_name IS NOT NULL AND publisher_name <> ''
+       ORDER BY publisher_name ASC`
+    )
+    return NextResponse.json({ publishers: rows.map(r => r.publisher_name) })
+  } catch {
     return NextResponse.json({ publishers: [] })
   }
-
-  const unique = [
-    ...new Set(
-      (data as { publisher_name: string | null }[])
-        .map(r => r.publisher_name)
-        .filter((v): v is string => typeof v === 'string' && v.trim() !== '')
-    ),
-  ].sort()
-
-  return NextResponse.json({ publishers: unique })
 }

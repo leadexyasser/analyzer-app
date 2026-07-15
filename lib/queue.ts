@@ -1,78 +1,80 @@
-import { createServiceClient } from '@/lib/supabase/server'
-import { JobType } from '@/types/database'
+import { many, query } from '@/lib/db'
+import type { JobType } from '@/types/database'
 
 const BACKOFF_MINUTES = [1, 5, 30]
 
-export async function enqueueJob(callId: string, jobType: JobType) {
-  const supabase = createServiceClient()
-  const { error } = await supabase.from('processing_jobs').insert({
-    call_id: callId,
-    job_type: jobType,
-    status: 'queued',
-    attempts: 0,
-    scheduled_for: new Date().toISOString(),
-  })
-  if (error) throw new Error(`Failed to enqueue ${jobType} job: ${error.message}`)
+export async function enqueueJob(callId: string, jobType: JobType): Promise<void> {
+  await query(
+    `INSERT INTO processing_jobs (call_id, job_type, status, attempts, scheduled_for)
+     VALUES ($1, $2, 'queued', 0, now())`,
+    [callId, jobType]
+  )
 }
 
-export async function dequeueJobs(limit = 3) {
-  const supabase = createServiceClient()
-  const now = new Date().toISOString()
-  // Jobs stuck in 'running' for >3 min timed out — reset them so they retry
-  const staleThreshold = new Date(Date.now() - 3 * 60_000).toISOString()
-  await supabase
-    .from('processing_jobs')
-    .update({ status: 'queued', scheduled_for: now })
-    .eq('status', 'running')
-    .lt('updated_at', staleThreshold)
-
-  // Cap analyze at 1 per invocation. Parallel gpt-4o calls (3 concurrent) burst over
-  // OpenAI Tier 1's 30k TPM with the ~3k-token analysis prompt and 429 in lockstep,
-  // wedging the queue. download/transcribe stay parallelizable up to the limit since
-  // they don't hit the LLM. The chain-call in /api/jobs/process drains bursts fast
-  // even at 1/invocation — see process route's `after()` block.
-  const { data: nonAnalyze, error: e1 } = await supabase
-    .from('processing_jobs')
-    .select('*, calls(*)')
-    .eq('status', 'queued')
-    .lte('scheduled_for', now)
-    .neq('job_type', 'analyze')
-    .order('scheduled_for', { ascending: true })
-    .limit(limit)
-  if (e1) throw new Error(`Failed to dequeue jobs: ${e1.message}`)
-
-  const remaining = limit - (nonAnalyze?.length ?? 0)
-  let analyze: any[] = []
-  if (remaining > 0) {
-    const { data, error: e2 } = await supabase
-      .from('processing_jobs')
-      .select('*, calls(*)')
-      .eq('status', 'queued')
-      .lte('scheduled_for', now)
-      .eq('job_type', 'analyze')
-      .order('scheduled_for', { ascending: true })
-      .limit(1)
-    if (e2) throw new Error(`Failed to dequeue analyze jobs: ${e2.message}`)
-    analyze = data ?? []
-  }
-
-  return [...(nonAnalyze ?? []), ...analyze]
+type JoinedJob = {
+  id: string
+  call_id: string
+  job_type: JobType
+  status: string
+  attempts: number
+  last_error: string | null
+  scheduled_for: Date
+  created_at: Date
+  // Nested call row (from row_to_json). Matches supabase's `select('*, calls(*)')` shape.
+  calls: Record<string, unknown> | null
 }
 
-export async function markJobRunning(jobId: string) {
-  const supabase = createServiceClient()
-  await supabase
-    .from('processing_jobs')
-    .update({ status: 'running' })
-    .eq('id', jobId)
+export async function dequeueJobs(limit = 3): Promise<JoinedJob[]> {
+  // Reset stuck 'running' jobs older than 3 min. processing_jobs has no updated_at column,
+  // so scheduled_for (which markJobRunning refreshes) serves as the last-touched marker.
+  await query(
+    `UPDATE processing_jobs SET status = 'queued', scheduled_for = now()
+     WHERE status = 'running' AND scheduled_for < now() - interval '3 minutes'`
+  )
+
+  // Cap analyze at 1 per invocation — 3 parallel gpt-4o hit Tier 1 30k TPM and wedge the queue.
+  const nonAnalyze = await many<JoinedJob>(
+    `SELECT j.id, j.call_id, j.job_type, j.status, j.attempts, j.last_error,
+            j.scheduled_for, j.created_at,
+            row_to_json(c.*) AS calls
+     FROM processing_jobs j
+     LEFT JOIN calls c ON c.id = j.call_id
+     WHERE j.status = 'queued'
+       AND j.scheduled_for <= now()
+       AND j.job_type <> 'analyze'
+     ORDER BY j.scheduled_for ASC
+     LIMIT $1`,
+    [limit]
+  )
+
+  const remaining = limit - nonAnalyze.length
+  const analyze = remaining > 0
+    ? await many<JoinedJob>(
+        `SELECT j.id, j.call_id, j.job_type, j.status, j.attempts, j.last_error,
+                j.scheduled_for, j.created_at,
+                row_to_json(c.*) AS calls
+         FROM processing_jobs j
+         LEFT JOIN calls c ON c.id = j.call_id
+         WHERE j.status = 'queued'
+           AND j.scheduled_for <= now()
+           AND j.job_type = 'analyze'
+         ORDER BY j.scheduled_for ASC
+         LIMIT 1`
+      )
+    : []
+
+  return [...nonAnalyze, ...analyze]
 }
 
-export async function markJobDone(jobId: string) {
-  const supabase = createServiceClient()
-  await supabase
-    .from('processing_jobs')
-    .update({ status: 'done' })
-    .eq('id', jobId)
+export async function markJobRunning(jobId: string): Promise<void> {
+  await query(
+    `UPDATE processing_jobs SET status = 'running', scheduled_for = now() WHERE id = $1`,
+    [jobId]
+  )
+}
+
+export async function markJobDone(jobId: string): Promise<void> {
+  await query(`UPDATE processing_jobs SET status = 'done' WHERE id = $1`, [jobId])
 }
 
 export async function markJobFailed(
@@ -80,39 +82,34 @@ export async function markJobFailed(
   error: string,
   attempts: number,
   isRateLimit = false
-) {
-  const supabase = createServiceClient()
-
+): Promise<void> {
   if (isRateLimit) {
-    // Rate limited — requeue for 90s, don't count as a failed attempt
-    // 90s > 60s TPM window, ensuring the rate limit clears before next attempt
-    const retryAt = new Date(Date.now() + 90_000).toISOString()
-    await supabase
-      .from('processing_jobs')
-      .update({ status: 'queued', scheduled_for: retryAt, last_error: error })
-      .eq('id', jobId)
+    // 90s > 60s TPM window — the limit clears before the next attempt. Don't count as attempt.
+    await query(
+      `UPDATE processing_jobs
+       SET status = 'queued', scheduled_for = now() + interval '90 seconds', last_error = $2
+       WHERE id = $1`,
+      [jobId, error]
+    )
     return
   }
 
   const newAttempts = attempts + 1
   const backoffIndex = Math.min(newAttempts - 1, BACKOFF_MINUTES.length - 1)
-  const backoffMs = BACKOFF_MINUTES[backoffIndex] * 60_000
-  const retryAt = new Date(Date.now() + backoffMs).toISOString()
+  const backoffMinutes = BACKOFF_MINUTES[backoffIndex]
 
   if (newAttempts >= 3) {
-    await supabase
-      .from('processing_jobs')
-      .update({ status: 'failed', attempts: newAttempts, last_error: error })
-      .eq('id', jobId)
+    await query(
+      `UPDATE processing_jobs SET status = 'failed', attempts = $2, last_error = $3 WHERE id = $1`,
+      [jobId, newAttempts, error]
+    )
   } else {
-    await supabase
-      .from('processing_jobs')
-      .update({
-        status: 'queued',
-        attempts: newAttempts,
-        last_error: error,
-        scheduled_for: retryAt,
-      })
-      .eq('id', jobId)
+    await query(
+      `UPDATE processing_jobs
+       SET status = 'queued', attempts = $2, last_error = $3,
+           scheduled_for = now() + ($4::int * interval '1 minute')
+       WHERE id = $1`,
+      [jobId, newAttempts, error, backoffMinutes]
+    )
   }
 }

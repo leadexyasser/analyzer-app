@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
 type State = 'idle' | 'confirming' | 'loading'
@@ -12,9 +11,9 @@ export function LogoutButton() {
 
   const handleConfirm = async () => {
     setState('loading')
-    const supabase = createClient()
-    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
+    router.refresh()
   }
 
   if (state === 'confirming') {

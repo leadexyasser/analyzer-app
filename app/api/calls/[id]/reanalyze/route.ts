@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
-import { after } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { one, query } from '@/lib/db'
+import { enqueueJob } from '@/lib/queue'
 import { runWorker } from '@/lib/worker'
 
 export const runtime = 'nodejs'
@@ -11,28 +11,25 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const supabase = createServiceClient()
 
-  const { data: call } = await supabase
-    .from('calls')
-    .select('id, status, recording_storage_path')
-    .eq('id', id)
-    .single()
-
+  const call = await one<{ id: string; status: string; recording_storage_path: string | null }>(
+    `SELECT id, status, recording_storage_path FROM calls WHERE id = $1`,
+    [id]
+  )
   if (!call) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (!call.recording_storage_path) return NextResponse.json({ error: 'No recording stored — cannot re-transcribe' }, { status: 400 })
+  if (!call.recording_storage_path) {
+    return NextResponse.json({ error: 'No recording stored — cannot re-transcribe' }, { status: 400 })
+  }
 
-  // Re-process from transcription onward so this call gets the AssemblyAI
-  // dual_channel pipeline. Just re-running analyze on old Whisper transcripts
-  // produces nearly identical results — the accuracy win is in the new transcription.
-  await supabase.from('processing_jobs').delete().eq('call_id', id).in('job_type', ['transcribe', 'analyze'])
-  await supabase.from('calls').update({ status: 'pending', error_message: null }).eq('id', id)
+  // Re-process from transcription onward so this call gets the AssemblyAI dual_channel pipeline.
+  await query(
+    `DELETE FROM processing_jobs WHERE call_id = $1 AND job_type = ANY($2::text[])`,
+    [id, ['transcribe', 'analyze']]
+  )
+  await query(`UPDATE calls SET status = 'pending', error_message = NULL WHERE id = $1`, [id])
 
-  const { enqueueJob } = await import('@/lib/queue')
   await enqueueJob(id, 'transcribe')
 
-  // Drain the queue in-process — no HTTP self-call, so this works regardless of cron health.
   after(async () => { try { await runWorker() } catch {} })
-
   return NextResponse.json({ ok: true })
 }

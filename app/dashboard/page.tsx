@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { createServiceClient } from '@/lib/supabase/server'
+import { many, one } from '@/lib/db'
 
 export const revalidate = 30
 export const metadata: Metadata = { title: 'Dashboard' }
@@ -15,6 +15,8 @@ import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from
 import { etTodayStr, etMidnight, etEndOfDay, shiftDateStr, etHourOf } from '@/lib/time'
 import { Suspense } from 'react'
 import { PublisherSwitcher } from '@/components/PublisherSwitcher'
+
+type UtmTag = 'utm_content' | 'utm_source' | 'utm_medium' | 'utm_campaign' | 'utm_id'
 
 function resolveRange(preset: string, from: string, to: string): { start: Date; end: Date; label: string } {
   const todayStr = etTodayStr()
@@ -38,65 +40,91 @@ function resolveRange(preset: string, from: string, to: string): { start: Date; 
 }
 
 async function getStats(start: Date, end: Date, publisherScope: string) {
-  const supabase = createServiceClient()
   const todayStart = etMidnight(etTodayStr())
 
-  function scope<T>(q: T): T {
-    return publisherScope ? (q as any).eq('publisher_name', publisherScope) : q
-  }
+  // Params: $1=start, $2=end, $3=todayStart, $4=scope (only if scoped).
+  const scopeSql = publisherScope ? ` AND publisher_name = $4` : ''
+  const params: unknown[] = [start.toISOString(), end.toISOString(), todayStart.toISOString()]
+  if (publisherScope) params.push(publisherScope)
 
   const [todayRes, revenueRes, analysisRes, todayCallsRes, allRes] = await Promise.all([
-    scope(supabase.from('calls').select('id', { count: 'exact', head: true })).gte('call_started_at', todayStart.toISOString()),
-    scope(supabase.from('calls').select('revenue')).gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('revenue', 'is', null),
-    // JSON path extraction: avoids pulling the full 5-10KB analysis blob per row
-    scope(supabase.from('calls').select('target_name, revenue, analysis->call_outcome, analysis->final_expense')).gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).eq('status', 'complete').not('analysis', 'is', null).limit(2000),
-    scope(supabase.from('calls').select('call_started_at')).gte('call_started_at', todayStart.toISOString()),
-    // Include metadata->utm_* (JSON path extraction) so UTM breakdown can be built from the same dataset.
-    // analysis->call_outcome is also pulled so we can count closed sales per UTM without re-querying.
-    scope(supabase.from('calls').select(
-      'campaign_name,publisher_name,status,revenue,payout,is_duplicate,quality_score,' +
-      'metadata->utm_content,metadata->utm_source,metadata->utm_medium,metadata->utm_campaign,metadata->utm_id,' +
-      'analysis->call_outcome'
-    )).gte('call_started_at', start.toISOString()).lte('call_started_at', end.toISOString()).limit(2000),
+    one<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM calls
+       WHERE call_started_at >= $3${scopeSql}`,
+      params
+    ),
+    many<{ revenue: string | null }>(
+      `SELECT revenue FROM calls
+       WHERE call_started_at >= $1 AND call_started_at <= $2
+         AND status = 'complete' AND revenue IS NOT NULL${scopeSql}`,
+      params
+    ),
+    many<{ target_name: string | null; revenue: string | null; call_outcome: string | null; final_expense: Record<string, unknown> | null }>(
+      `SELECT target_name, revenue,
+              analysis->>'call_outcome' AS call_outcome,
+              analysis->'final_expense' AS final_expense
+       FROM calls
+       WHERE call_started_at >= $1 AND call_started_at <= $2
+         AND status = 'complete' AND analysis IS NOT NULL${scopeSql}
+       LIMIT 2000`,
+      params
+    ),
+    many<{ call_started_at: string }>(
+      `SELECT call_started_at::text AS call_started_at FROM calls
+       WHERE call_started_at >= $3${scopeSql}`,
+      params
+    ),
+    many<{
+      campaign_name: string | null; publisher_name: string | null; status: string;
+      revenue: string | null; payout: string | null; is_duplicate: boolean | null;
+      quality_score: number | null; utm_content: string | null; utm_source: string | null;
+      utm_medium: string | null; utm_campaign: string | null; utm_id: string | null;
+      call_outcome: string | null;
+    }>(
+      `SELECT campaign_name, publisher_name, status, revenue, payout, is_duplicate, quality_score,
+              metadata->>'utm_content'  AS utm_content,
+              metadata->>'utm_source'   AS utm_source,
+              metadata->>'utm_medium'   AS utm_medium,
+              metadata->>'utm_campaign' AS utm_campaign,
+              metadata->>'utm_id'       AS utm_id,
+              analysis->>'call_outcome' AS call_outcome
+       FROM calls
+       WHERE call_started_at >= $1 AND call_started_at <= $2${scopeSql}
+       LIMIT 2000`,
+      params
+    ),
   ])
 
-  const callsToday = todayRes.count ?? 0
-  const revenue = (revenueRes.data ?? []).reduce((s: number, r: any) => s + Number(r.revenue ?? 0), 0)
+  const callsToday = todayRes ? Number(todayRes.count) : 0
+  const revenue = revenueRes.reduce((s, r) => s + Number(r.revenue ?? 0), 0)
 
   const feScores: number[] = []
   let complianceTotal = 0, complianceClean = 0
   const complianceFlagCounts: Record<string, number> = {}
   let closedCount = 0
-  const totalAnalyzed = (analysisRes.data ?? []).length
+  const totalAnalyzed = analysisRes.length
 
   type TRow = {
-    name: string
-    incoming: number
-    closed: number
-    revenue: number
-    // Running sums for per-target FE quality + compliance scoring
-    feScoreSum: number
-    feScoreCount: number
-    complianceTotal: number
-    complianceClean: number
+    name: string; incoming: number; closed: number; revenue: number;
+    feScoreSum: number; feScoreCount: number;
+    complianceTotal: number; complianceClean: number;
   }
   const targetMap = new Map<string, TRow>()
 
-  for (const row of analysisRes.data ?? []) {
-    const r = row as any
-    // JSON path extraction returns call_outcome and final_expense as top-level fields
-    const fe = r.final_expense
+  for (const r of analysisRes) {
+    const fe = r.final_expense as Record<string, unknown> | null
     const isClosed = r.call_outcome === 'sale_closed'
     const target = r.target_name ?? '—'
     const rev = r.revenue != null ? Number(r.revenue) : 0
 
     if (fe) {
-      const score = computeFELeadQuality(fe)
+      const feAny = fe as any
+      const score = computeFELeadQuality(feAny)
       if (score !== null) feScores.push(score)
       complianceTotal++
-      if (hasComplianceIssue(fe)) {
+      if (hasComplianceIssue(feAny)) {
         for (const key of Object.keys(COMPLIANCE_FLAG_LABELS)) {
-          if (fe[key]) complianceFlagCounts[key] = (complianceFlagCounts[key] ?? 0) + 1
+          if (feAny[key]) complianceFlagCounts[key] = (complianceFlagCounts[key] ?? 0) + 1
         }
       } else {
         complianceClean++
@@ -117,13 +145,11 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
     t.revenue += rev
     if (isClosed) t.closed++
     if (fe) {
-      const tScore = computeFELeadQuality(fe)
-      if (tScore !== null) {
-        t.feScoreSum += tScore
-        t.feScoreCount++
-      }
+      const feAny = fe as any
+      const tScore = computeFELeadQuality(feAny)
+      if (tScore !== null) { t.feScoreSum += tScore; t.feScoreCount++ }
       t.complianceTotal++
-      if (!hasComplianceIssue(fe)) t.complianceClean++
+      if (!hasComplianceIssue(feAny)) t.complianceClean++
     }
   }
 
@@ -138,10 +164,7 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
 
   const byTarget = [...targetMap.values()]
     .map(t => ({
-      name: t.name,
-      incoming: t.incoming,
-      closed: t.closed,
-      revenue: t.revenue,
+      name: t.name, incoming: t.incoming, closed: t.closed, revenue: t.revenue,
       cpa: t.closed > 0 ? t.revenue / t.closed : null,
       feScore: t.feScoreCount > 0 ? Math.round(t.feScoreSum / t.feScoreCount) : null,
       complianceScore: t.complianceTotal > 0 ? Math.round((t.complianceClean / t.complianceTotal) * 100) : null,
@@ -150,34 +173,28 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
     .sort((a, b) => b.incoming - a.incoming)
 
   const hourly = Array(24).fill(0)
-  for (const row of todayCallsRes.data ?? []) {
+  for (const row of todayCallsRes) {
     const h = etHourOf(row.call_started_at)
     hourly[h] = (hourly[h] ?? 0) + 1
   }
 
   type SRow = { name: string; incoming: number; completed: number; revenue: number; payout: number; duplicates: number; avgQuality: number | null }
+  type UtmRow = SRow & { closed: number }
   const campaignMap = new Map<string, SRow>()
   const publisherMap = new Map<string, SRow>()
-
-  // UTM aggregations — same shape as campaign/publisher rows, plus closed sales count per UTM.
-  type UtmRow = SRow & { closed: number }
   const utmMaps: Record<UtmTag, Map<string, UtmRow>> = {
-    utm_content:  new Map(),
-    utm_source:   new Map(),
-    utm_medium:   new Map(),
-    utm_campaign: new Map(),
-    utm_id:       new Map(),
+    utm_content: new Map(), utm_source: new Map(), utm_medium: new Map(),
+    utm_campaign: new Map(), utm_id: new Map(),
   }
   const UTM_TAGS: UtmTag[] = ['utm_content', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_id']
 
-  // Supabase's inferred type for selects with multiple JSON path extractions devolves to a
-  // generic error type — cast to any[]; runtime fields are the requested ones.
-  for (const r of (allRes.data ?? []) as any[]) {
+  for (const r of allRes) {
     const camp = r.campaign_name ?? '—'
     const pub  = r.publisher_name ?? '—'
     const rev  = r.revenue != null ? Number(r.revenue) : 0
     const pay  = r.payout  != null ? Number(r.payout)  : 0
-    const qs   = r.quality_score as number | null
+    const qs   = r.quality_score
+
     for (const [map, key] of [[campaignMap, camp], [publisherMap, pub]] as const) {
       if (!map.has(key)) map.set(key, { name: key, incoming: 0, completed: 0, revenue: 0, payout: 0, duplicates: 0, avgQuality: null })
       const row = map.get(key)!
@@ -187,17 +204,14 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
       if (qs != null) row.avgQuality = row.avgQuality == null ? qs : Math.round((row.avgQuality + qs) / 2)
     }
 
-    // UTM rollups — JSON path extraction returns each utm_* as a top-level field on the row.
-    // Missing tags get bucketed as "(none)" so untagged traffic is visible, not invisible.
-    const ra = r as any
     const utmValues: Record<UtmTag, string> = {
-      utm_content:  String(ra.utm_content  ?? '').trim() || '(none)',
-      utm_source:   String(ra.utm_source   ?? '').trim() || '(none)',
-      utm_medium:   String(ra.utm_medium   ?? '').trim() || '(none)',
-      utm_campaign: String(ra.utm_campaign ?? '').trim() || '(none)',
-      utm_id:       String(ra.utm_id       ?? '').trim() || '(none)',
+      utm_content:  String(r.utm_content  ?? '').trim() || '(none)',
+      utm_source:   String(r.utm_source   ?? '').trim() || '(none)',
+      utm_medium:   String(r.utm_medium   ?? '').trim() || '(none)',
+      utm_campaign: String(r.utm_campaign ?? '').trim() || '(none)',
+      utm_id:       String(r.utm_id       ?? '').trim() || '(none)',
     }
-    const isClosed = ra.call_outcome === 'sale_closed'
+    const isClosed = r.call_outcome === 'sale_closed'
     for (const tag of UTM_TAGS) {
       const key = utmValues[tag]
       const map = utmMaps[tag]
@@ -229,8 +243,6 @@ async function getStats(start: Date, end: Date, publisherScope: string) {
   }
 }
 
-type UtmTag = 'utm_content' | 'utm_source' | 'utm_medium' | 'utm_campaign' | 'utm_id'
-
 function StatCard({ label, value, sub, accent = false, warn = false, green = false }: {
   label: string; value: string; sub?: string; accent?: boolean; warn?: boolean; green?: boolean
 }) {
@@ -251,7 +263,6 @@ async function DashboardStats({ start, end, label, publisherScope }: { start: Da
   const stats = await getStats(start, end, publisherScope)
   return (
     <>
-      {/* Stats — Row 1: Business KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Calls Today" value={String(stats.callsToday)} />
         <StatCard label={`Revenue (${label})`} value={`$${stats.revenue.toFixed(0)}`} accent />
@@ -276,7 +287,6 @@ async function DashboardStats({ start, end, label, publisherScope }: { start: Da
         </div>
       )}
 
-      {/* Stats — Row 2: Quality indicators */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatCard label="FE Lead Quality" value={stats.avgFEQuality != null ? `${stats.avgFEQuality}%` : '—'} sub="avg weighted qualifier score" />
         <StatCard
@@ -338,8 +348,6 @@ export default async function DashboardPage({
 
   return (
     <div className="space-y-5">
-
-      {/* Header — renders instantly */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-base font-semibold" style={{ color: 'var(--rb-text)' }}>Call Logs</h1>
@@ -358,12 +366,10 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* Stats + Timeline + Summary — streamed in, shows skeleton while loading */}
       <Suspense fallback={<Statsskeleton />}>
         <DashboardStats start={start} end={end} label={label} publisherScope={publisherScope} />
       </Suspense>
 
-      {/* Call log */}
       <CallsTable dateFrom={start.toISOString()} dateTo={end.toISOString()} publisherScope={publisherScope} />
     </div>
   )

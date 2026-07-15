@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { createServiceClient } from '@/lib/supabase/server'
+import { query } from '@/lib/db'
 import { AnalysisSchema } from '@/types/analysis'
 
 export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -26,15 +26,18 @@ async function logApiCall(params: {
   error?: string | null
 }) {
   try {
-    const supabase = createServiceClient()
-    await supabase.from('api_logs').insert({
-      call_id: params.call_id,
-      service: params.service,
-      request_duration_ms: params.duration_ms,
-      status_code: params.status_code,
-      tokens_used: params.tokens_used ?? null,
-      error: params.error ?? null,
-    })
+    await query(
+      `INSERT INTO api_logs (call_id, service, request_duration_ms, status_code, tokens_used, error)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        params.call_id,
+        params.service,
+        params.duration_ms,
+        params.status_code,
+        params.tokens_used ?? null,
+        params.error ?? null,
+      ]
+    )
   } catch {
     // Non-critical
   }

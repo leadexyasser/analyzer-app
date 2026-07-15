@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { many, one } from '@/lib/db'
 
 export const runtime = 'nodejs'
+
+const COLUMNS = `id, ringba_call_id, received_at, call_started_at, duration_seconds,
+  caller_id, target_number, campaign_name, campaign_id, buyer_name, publisher_name,
+  target_id, target_name, end_call_source, is_duplicate, revenue, payout,
+  quality_score, flags, analysis, status, error_message`
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -25,35 +30,52 @@ export async function GET(request: NextRequest) {
   const to = searchParams.get('to')
   const leadVerdict = searchParams.get('lead_verdict')
 
-  const supabase = createServiceClient()
-  let query = supabase
-    .from('calls')
-    .select(
-      'id,ringba_call_id,received_at,call_started_at,duration_seconds,caller_id,target_number,campaign_name,campaign_id,buyer_name,publisher_name,target_id,target_name,end_call_source,is_duplicate,revenue,payout,quality_score,flags,analysis,status,error_message',
-      { count: 'exact' }
-    )
-    .order('call_started_at', { ascending: false })
-    .range(offset, offset + limit - 1)
+  const where: string[] = []
+  const values: unknown[] = []
+  const add = (sqlWithPlaceholder: string, ...vals: unknown[]) => {
+    let idx = 0
+    const rendered = sqlWithPlaceholder.replace(/\?/g, () => {
+      const n = values.length + idx + 1
+      idx++
+      return `$${n}`
+    })
+    where.push(rendered)
+    values.push(...vals)
+  }
 
-  if (publisherScope) query = query.eq('publisher_name', publisherScope)
-  if (status) query = query.eq('status', status)
-  if (campaign) query = query.ilike('campaign_name', `%${campaign}%`)
-  if (buyer) query = query.ilike('buyer_name', `%${buyer}%`)
-  if (publisher) query = query.ilike('publisher_name', `%${publisher}%`)
-  if (targetName) query = query.ilike('target_name', `%${targetName}%`)
-  if (callerId) query = query.ilike('caller_id', `%${callerId}%`)
-  if (endCallSource) query = query.ilike('end_call_source', `%${endCallSource}%`)
-  if (isDuplicate === 'true') query = query.eq('is_duplicate', true)
-  if (isDuplicate === 'false') query = query.eq('is_duplicate', false)
-  if (flags?.length) query = query.overlaps('flags', flags)
-  if (minScore) query = query.gte('quality_score', Number(minScore))
-  if (maxScore) query = query.lte('quality_score', Number(maxScore))
-  if (from) query = query.gte('call_started_at', from)
-  if (to) query = query.lte('call_started_at', to)
-  if (leadVerdict) query = (query as any).eq('analysis->>lead_intent->>verdict', leadVerdict)
+  if (publisherScope) add(`publisher_name = ?`, publisherScope)
+  if (status)         add(`status = ?`, status)
+  if (campaign)       add(`campaign_name ILIKE ?`, `%${campaign}%`)
+  if (buyer)          add(`buyer_name ILIKE ?`, `%${buyer}%`)
+  if (publisher)      add(`publisher_name ILIKE ?`, `%${publisher}%`)
+  if (targetName)     add(`target_name ILIKE ?`, `%${targetName}%`)
+  if (callerId)       add(`caller_id ILIKE ?`, `%${callerId}%`)
+  if (endCallSource)  add(`end_call_source ILIKE ?`, `%${endCallSource}%`)
+  if (isDuplicate === 'true')  where.push(`is_duplicate = true`)
+  if (isDuplicate === 'false') where.push(`is_duplicate = false`)
+  if (flags?.length)  add(`flags && ?::text[]`, flags)
+  if (minScore)       add(`quality_score >= ?`, Number(minScore))
+  if (maxScore)       add(`quality_score <= ?`, Number(maxScore))
+  if (from)           add(`call_started_at >= ?`, from)
+  if (to)             add(`call_started_at <= ?`, to)
+  if (leadVerdict)    add(`analysis->'lead_intent'->>'verdict' = ?`, leadVerdict)
 
-  const { data, count, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
-  return NextResponse.json({ calls: data, total: count, page, limit })
+  try {
+    const [countRow, rows] = await Promise.all([
+      one<{ count: string }>(`SELECT COUNT(*)::text AS count FROM calls ${whereSql}`, values),
+      many(
+        `SELECT ${COLUMNS} FROM calls ${whereSql}
+         ORDER BY call_started_at DESC NULLS LAST
+         LIMIT ${limit} OFFSET ${offset}`,
+        values
+      ),
+    ])
+    const total = countRow ? Number(countRow.count) : 0
+    return NextResponse.json({ calls: rows, total, page, limit })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'unknown'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
 }

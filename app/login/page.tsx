@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import type { FormEvent } from 'react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -9,18 +9,27 @@ export default function LoginPage() {
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-    })
-    if (error) setError(error.message)
-    else setSent(true)
-    setLoading(false)
+    try {
+      const res = await fetch('/api/auth/magic-link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        setError(body.error ?? `Sign-in failed (${res.status})`)
+      } else {
+        setSent(true)
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Sign-in failed')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -29,7 +38,6 @@ export default function LoginPage() {
       style={{ background: 'var(--background)' }}
     >
       <div className="w-full max-w-sm space-y-8">
-        {/* Logo */}
         <div className="text-center space-y-3">
           <div
             className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-black mx-auto"
@@ -43,7 +51,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Card */}
         <div
           className="rounded-xl p-6 space-y-5"
           style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}
