@@ -45,7 +45,7 @@ export function DashboardShell({ email, children }: Props) {
             </div>
             <div>
               <p className="text-xs font-bold leading-tight" style={{ color: 'var(--rb-text)' }}>Call Analyzer</p>
-              <p className="text-[10px]" style={{ color: 'var(--rb-text-3)' }}>Final Expense</p>
+              <p className="text-[10px]" style={{ color: 'var(--rb-text-3)' }}>FE · Debt</p>
             </div>
           </div>
         </div>

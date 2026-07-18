@@ -3,9 +3,15 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-const NAV = [
+type NavItem = {
+  label: string
+  href: string
+  icon: React.ReactNode
+}
+
+const NAV: NavItem[] = [
   {
-    label: 'Call Logs',
+    label: 'Final Expense',
     href: '/dashboard',
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -13,10 +19,29 @@ const NAV = [
       </svg>
     ),
   },
+  {
+    label: 'Debt Spanish',
+    href: '/dashboard/debt',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <circle cx="8" cy="8" r="6" />
+        <path d="M8 4v8M6 6h3.5a1.5 1.5 0 010 3H6M9.5 12H6" strokeLinecap="round" />
+      </svg>
+    ),
+  },
 ]
+
+// Longest matching prefix wins so /dashboard/debt doesn't also light up /dashboard.
+function pickActive(pathname: string): string | null {
+  const matches = NAV
+    .filter(item => pathname === item.href || pathname.startsWith(item.href + '/'))
+    .sort((a, b) => b.href.length - a.href.length)
+  return matches[0]?.href ?? null
+}
 
 export function NavLinks() {
   const pathname = usePathname()
+  const activeHref = pickActive(pathname)
 
   return (
     <nav className="flex-1 py-3 space-y-0.5 px-2">
@@ -24,7 +49,7 @@ export function NavLinks() {
         Analytics
       </p>
       {NAV.map(item => {
-        const active = pathname === item.href || pathname.startsWith(item.href + '/')
+        const active = activeHref === item.href
         return (
           <Link
             key={item.href}
