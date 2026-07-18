@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { getSessionFromRequest } from '@/lib/auth'
-import { one, query } from '@/lib/db'
+import { one } from '@/lib/db'
 import { parseRingbaCsv } from '@/lib/debt/csv'
 import { enqueueDebtJob } from '@/lib/debt/queue'
 import { runDebtWorker } from '@/lib/debt/worker'
@@ -8,7 +8,7 @@ import { runDebtWorker } from '@/lib/debt/worker'
 export const runtime = 'nodejs'
 export const maxDuration = 90
 
-const MAX_CSV_BYTES = 20 * 1024 * 1024 // 20 MB — generous for a Ringba export
+const MAX_CSV_BYTES = 20 * 1024 * 1024 // 20 MB
 
 export async function POST(request: NextRequest) {
   const session = await getSessionFromRequest()
@@ -36,12 +36,18 @@ export async function POST(request: NextRequest) {
 
   const sourceFilename = file.name
   let inserted = 0
-  let skipped = 0
+  let updated = 0
   const newIds: string[] = []
 
-  // Insert with ON CONFLICT DO NOTHING — dedup by recording URL.
   for (const row of rows) {
-    const result = await one<{ id: string }>(
+    // Upsert semantics:
+    //  - New Recording URL → insert, queue for download → transcribe → analyze.
+    //  - Existing Recording URL → refresh the CSV-sourced metadata columns only.
+    //    Analysis pipeline output (transcript, analysis, scores, status) is preserved.
+    //    NULL cells in the new CSV don't overwrite existing values (COALESCE new, old).
+    //  - source_filename is unconditionally updated so the row reflects the last CSV that touched it.
+    //  - xmax = 0 tells us whether the row was actually inserted (fresh) vs updated (already existed).
+    const result = await one<{ id: string; is_new: boolean }>(
       `INSERT INTO debt_calls (
          recording_url_original, call_started_at, campaign, caller_id, target_number,
          number_pool, is_duplicate,
@@ -49,8 +55,20 @@ export async function POST(request: NextRequest) {
          revenue, source_filename, status, processing_attempts
        )
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending', 0)
-       ON CONFLICT (recording_url_original) DO NOTHING
-       RETURNING id`,
+       ON CONFLICT (recording_url_original) DO UPDATE SET
+         call_started_at          = COALESCE(EXCLUDED.call_started_at,          debt_calls.call_started_at),
+         campaign                 = COALESCE(EXCLUDED.campaign,                 debt_calls.campaign),
+         caller_id                = COALESCE(EXCLUDED.caller_id,                debt_calls.caller_id),
+         target_number            = COALESCE(EXCLUDED.target_number,            debt_calls.target_number),
+         number_pool              = COALESCE(EXCLUDED.number_pool,              debt_calls.number_pool),
+         is_duplicate             = COALESCE(EXCLUDED.is_duplicate,             debt_calls.is_duplicate),
+         time_to_call_seconds     = COALESCE(EXCLUDED.time_to_call_seconds,     debt_calls.time_to_call_seconds),
+         time_to_connect_seconds  = COALESCE(EXCLUDED.time_to_connect_seconds,  debt_calls.time_to_connect_seconds),
+         connected_length_seconds = COALESCE(EXCLUDED.connected_length_seconds, debt_calls.connected_length_seconds),
+         duration_seconds         = COALESCE(EXCLUDED.duration_seconds,         debt_calls.duration_seconds),
+         revenue                  = COALESCE(EXCLUDED.revenue,                  debt_calls.revenue),
+         source_filename          = EXCLUDED.source_filename
+       RETURNING id, (xmax = 0) AS is_new`,
       [
         row.recording_url_original,
         row.call_started_at,
@@ -67,27 +85,30 @@ export async function POST(request: NextRequest) {
         sourceFilename,
       ]
     )
-    if (result?.id) {
+    if (!result) continue
+    if (result.is_new) {
       inserted++
       newIds.push(result.id)
     } else {
-      skipped++
+      updated++
     }
   }
 
-  // Enqueue download jobs for the newly-inserted rows.
+  // Only enqueue the pipeline for freshly inserted rows.
+  // Existing rows keep whatever transcript/analysis they already have.
   for (const id of newIds) {
     await enqueueDebtJob(id, 'download')
   }
 
-  // Kick the worker after responding.
-  after(async () => { try { await runDebtWorker() } catch {} })
+  if (newIds.length > 0) {
+    after(async () => { try { await runDebtWorker() } catch {} })
+  }
 
   return NextResponse.json({
     ok: true,
     total_rows_in_csv: rows.length,
     inserted,
-    skipped_duplicates: skipped,
+    updated,
     filename: sourceFilename,
   })
 }

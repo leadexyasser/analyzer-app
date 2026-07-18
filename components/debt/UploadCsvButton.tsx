@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 
 type Result = {
   inserted: number
-  skipped_duplicates: number
+  updated: number
   total_rows_in_csv: number
   filename: string
 }
@@ -68,12 +68,19 @@ export function UploadCsvButton() {
 
       {result && (
         <p className="text-xs" style={{ color: 'var(--rb-text-2)' }}>
-          <strong style={{ color: 'var(--rb-accent)' }}>{result.filename}</strong> · added{' '}
-          <strong style={{ color: 'var(--rb-green)' }}>{result.inserted}</strong>
-          {result.skipped_duplicates > 0 && (
+          <strong style={{ color: 'var(--rb-accent)' }}>{result.filename}</strong>
+          {result.inserted > 0 && (
             <>
-              {' '}· skipped <strong style={{ color: 'var(--rb-text-3)' }}>{result.skipped_duplicates}</strong> duplicate{result.skipped_duplicates !== 1 ? 's' : ''}
+              {' '}· added <strong style={{ color: 'var(--rb-green)' }}>{result.inserted}</strong> new
             </>
+          )}
+          {result.updated > 0 && (
+            <>
+              {' '}· refreshed <strong style={{ color: 'var(--rb-accent)' }}>{result.updated}</strong> existing
+            </>
+          )}
+          {result.inserted === 0 && result.updated === 0 && (
+            <>{' '}· <span style={{ color: 'var(--rb-text-3)' }}>no changes</span></>
           )}
         </p>
       )}
