@@ -42,6 +42,28 @@ export async function GET(request: NextRequest) {
     values.push(...vals)
   }
 
+  // ---- Sort: whitelist columns to prevent SQL injection ----
+  // Map incoming ?sort=<key> to the actual SQL expression. Anything not in the
+  // whitelist falls back to the default (most recent first).
+  const SORT_EXPRS: Record<string, string> = {
+    call_started_at:          'call_started_at',
+    campaign:                 'campaign',
+    caller_id:                'caller_id',
+    connected_length_seconds: 'connected_length_seconds',
+    duration_seconds:         'duration_seconds',
+    revenue:                  'revenue',
+    debt_amount_usd:          `(analysis->'debt_info'->>'stated_debt_amount_usd')::numeric`,
+    quality_score:            'quality_score',
+    compliance_score:         'compliance_score',
+    status:                   'status',
+  }
+  const sortParam = searchParams.get('sort') ?? 'call_started_at'
+  const dirParam = (searchParams.get('dir') ?? 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC'
+  const sortExpr = SORT_EXPRS[sortParam] ?? SORT_EXPRS.call_started_at
+  // NULLS LAST regardless of direction — a null Debt Load or Quality shouldn't
+  // occupy the top of the list just because the caller sorted ascending.
+  const orderBy = `${sortExpr} ${dirParam} NULLS LAST, uploaded_at DESC`
+
   if (campaign)      add(`campaign ILIKE ?`, `%${campaign}%`)
   if (callerId)      add(`caller_id ILIKE ?`, `%${callerId}%`)
   if (status)        add(`status = ?`, status)
@@ -62,7 +84,7 @@ export async function GET(request: NextRequest) {
       one<{ count: string }>(`SELECT COUNT(*)::text AS count FROM debt_calls ${whereSql}`, values),
       many(
         `SELECT ${COLUMNS} FROM debt_calls ${whereSql}
-         ORDER BY call_started_at DESC NULLS LAST, uploaded_at DESC
+         ORDER BY ${orderBy}
          LIMIT ${limit} OFFSET ${offset}`,
         values
       ),

@@ -28,6 +28,13 @@ const STATUS_COLOR: Record<string, string> = {
   analyzing: 'var(--rb-accent)',
 }
 
+type SortCol =
+  | 'call_started_at' | 'campaign' | 'caller_id'
+  | 'connected_length_seconds' | 'duration_seconds'
+  | 'revenue' | 'debt_amount_usd' | 'quality_score' | 'compliance_score' | 'status'
+
+type SortDir = 'asc' | 'desc'
+
 function fmtSecs(s: number | null): string {
   if (s == null) return '—'
   const m = Math.floor(s / 60)
@@ -57,18 +64,58 @@ function ScoreCell({ score, threshold = 70 }: { score: number | null; threshold?
   return <span className="font-semibold tabular-nums" style={{ color }}>{score}</span>
 }
 
+function SortableTH({
+  children, col, sort, setSort,
+}: {
+  children: React.ReactNode
+  col: SortCol
+  sort: { col: SortCol; dir: SortDir }
+  setSort: (s: { col: SortCol; dir: SortDir }) => void
+}) {
+  const active = sort.col === col
+  const arrow = active ? (sort.dir === 'desc' ? '▼' : '▲') : '⇅'
+  const isText = col === 'campaign' || col === 'caller_id' || col === 'status'
+  return (
+    <th
+      scope="col"
+      className="text-left px-3 py-2 font-semibold whitespace-nowrap cursor-pointer select-none transition-colors hover:bg-[var(--rb-surface)]"
+      style={{ color: active ? 'var(--rb-accent)' : 'var(--rb-text-3)' }}
+      onClick={() => {
+        // Click same column → toggle direction. Switch column → sensible default
+        // (asc for text so A→Z reads naturally; desc for numbers so biggest first).
+        if (sort.col === col) setSort({ col, dir: sort.dir === 'desc' ? 'asc' : 'desc' })
+        else setSort({ col, dir: isText ? 'asc' : 'desc' })
+      }}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        {children}
+        <span className="text-[9px] tabular-nums" style={{ opacity: active ? 1 : 0.4 }}>{arrow}</span>
+      </span>
+    </th>
+  )
+}
+
 export function DebtCallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
   const [rows, setRows] = useState<DebtCallRow[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [filter, setFilter] = useState('')
+  const [sort, setSort] = useState<{ col: SortCol; dir: SortDir }>({
+    col: 'call_started_at', dir: 'desc',
+  })
+
+  // Reset to page 1 when the sort changes so the user doesn't stay on p3 of a
+  // reordered list and wonder where the top of the new ranking is.
+  useEffect(() => { setPage(1) }, [sort])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     const url = new URL('/api/debt/calls', window.location.origin)
     url.searchParams.set('page', String(page))
+    url.searchParams.set('sort', sort.col)
+    url.searchParams.set('dir', sort.dir)
     if (dateFrom) url.searchParams.set('from', dateFrom)
     if (dateTo)   url.searchParams.set('to', dateTo)
     fetch(url.toString(), { cache: 'no-store' })
@@ -81,7 +128,7 @@ export function DebtCallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo:
       .catch(() => setRows([]))
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [page, dateFrom, dateTo])
+  }, [page, dateFrom, dateTo, sort])
 
   const filtered = useMemo(() => {
     if (!filter.trim()) return rows
@@ -116,9 +163,16 @@ export function DebtCallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo:
         <table className="w-full text-xs">
           <thead style={{ background: 'var(--rb-surface-2)' }}>
             <tr>
-              {['Date', 'Campaign', 'Caller ID', 'Connected', 'Duration', 'Revenue', 'Debt Load', 'Quality', 'Compliance', 'Status'].map(h => (
-                <th key={h} className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--rb-text-3)' }}>{h}</th>
-              ))}
+              <SortableTH col="call_started_at"          sort={sort} setSort={setSort}>Date</SortableTH>
+              <SortableTH col="campaign"                 sort={sort} setSort={setSort}>Campaign</SortableTH>
+              <SortableTH col="caller_id"                sort={sort} setSort={setSort}>Caller ID</SortableTH>
+              <SortableTH col="connected_length_seconds" sort={sort} setSort={setSort}>Connected</SortableTH>
+              <SortableTH col="duration_seconds"         sort={sort} setSort={setSort}>Duration</SortableTH>
+              <SortableTH col="revenue"                  sort={sort} setSort={setSort}>Revenue</SortableTH>
+              <SortableTH col="debt_amount_usd"          sort={sort} setSort={setSort}>Debt Load</SortableTH>
+              <SortableTH col="quality_score"            sort={sort} setSort={setSort}>Quality</SortableTH>
+              <SortableTH col="compliance_score"         sort={sort} setSort={setSort}>Compliance</SortableTH>
+              <SortableTH col="status"                   sort={sort} setSort={setSort}>Status</SortableTH>
             </tr>
           </thead>
           <tbody>
