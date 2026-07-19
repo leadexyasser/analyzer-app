@@ -10,6 +10,8 @@ type DebtCallRow = {
   caller_id: string | null
   duration_seconds: number | null
   connected_length_seconds: number | null
+  revenue: number | string | null
+  debt_amount_usd: number | string | null
   quality_score: number | null
   compliance_score: number | null
   status: string
@@ -39,6 +41,14 @@ function fmtDate(iso: string | null): string {
   return d.toLocaleString('en-US', {
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
   })
+}
+
+function fmtUsd(v: number | string | null | undefined): string {
+  if (v == null) return '—'
+  const n = typeof v === 'string' ? Number(v) : v
+  if (!Number.isFinite(n)) return '—'
+  if (n === 0) return '$0'
+  return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 }
 
 function ScoreCell({ score, threshold = 70 }: { score: number | null; threshold?: number }) {
@@ -78,8 +88,7 @@ export function DebtCallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo:
     const f = filter.trim().toLowerCase()
     return rows.filter(r =>
       (r.campaign?.toLowerCase().includes(f) ?? false) ||
-      (r.caller_id?.toLowerCase().includes(f) ?? false) ||
-      (r.source_filename?.toLowerCase().includes(f) ?? false)
+      (r.caller_id?.toLowerCase().includes(f) ?? false)
     )
   }, [rows, filter])
 
@@ -93,7 +102,7 @@ export function DebtCallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo:
         <input
           value={filter}
           onChange={e => setFilter(e.target.value)}
-          placeholder="Filter campaign / caller / filename…"
+          placeholder="Filter campaign or caller…"
           className="px-2.5 py-1.5 rounded-md text-xs outline-none w-64"
           style={{
             background: 'var(--rb-surface-2)',
@@ -107,17 +116,17 @@ export function DebtCallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo:
         <table className="w-full text-xs">
           <thead style={{ background: 'var(--rb-surface-2)' }}>
             <tr>
-              {['Date', 'Campaign', 'Caller ID', 'Connected', 'Duration', 'Quality', 'Compliance', 'Status', 'Source'].map(h => (
+              {['Date', 'Campaign', 'Caller ID', 'Connected', 'Duration', 'Revenue', 'Debt Load', 'Quality', 'Compliance', 'Status'].map(h => (
                 <th key={h} className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--rb-text-3)' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={9} className="text-center py-8" style={{ color: 'var(--rb-text-3)' }}>Loading…</td></tr>
+              <tr><td colSpan={10} className="text-center py-8" style={{ color: 'var(--rb-text-3)' }}>Loading…</td></tr>
             )}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={9} className="text-center py-8" style={{ color: 'var(--rb-text-3)' }}>No calls yet — upload a Ringba CSV to get started.</td></tr>
+              <tr><td colSpan={10} className="text-center py-8" style={{ color: 'var(--rb-text-3)' }}>No calls yet — upload a Ringba CSV to get started.</td></tr>
             )}
             {!loading && filtered.map(row => (
               <tr key={row.id}
@@ -132,10 +141,11 @@ export function DebtCallsTable({ dateFrom, dateTo }: { dateFrom: string; dateTo:
                 <td className="px-3 py-2 whitespace-nowrap tabular-nums" style={{ color: 'var(--rb-text-2)' }}>{row.caller_id ?? '—'}</td>
                 <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--rb-text-2)' }}>{fmtSecs(row.connected_length_seconds)}</td>
                 <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--rb-text-2)' }}>{fmtSecs(row.duration_seconds)}</td>
+                <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--rb-text-2)' }}>{fmtUsd(row.revenue)}</td>
+                <td className="px-3 py-2 tabular-nums font-medium" style={{ color: row.debt_amount_usd != null ? 'var(--rb-accent)' : 'var(--rb-text-3)' }}>{fmtUsd(row.debt_amount_usd)}</td>
                 <td className="px-3 py-2"><ScoreCell score={row.quality_score} /></td>
                 <td className="px-3 py-2"><ScoreCell score={row.compliance_score} threshold={80} /></td>
                 <td className="px-3 py-2 capitalize" style={{ color: STATUS_COLOR[row.status] ?? 'var(--rb-text-3)' }}>{row.status}</td>
-                <td className="px-3 py-2 truncate max-w-[180px]" style={{ color: 'var(--rb-text-3)' }} title={row.source_filename ?? ''}>{row.source_filename ?? '—'}</td>
               </tr>
             ))}
           </tbody>

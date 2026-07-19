@@ -8,7 +8,9 @@ const COLUMNS = `id, recording_url_original, received_at, call_started_at,
   campaign, caller_id, target_number, number_pool, is_duplicate,
   time_to_call_seconds, time_to_connect_seconds, connected_length_seconds, duration_seconds,
   revenue, recording_storage_path,
-  quality_score, compliance_score, flags, analysis,
+  quality_score, compliance_score, flags,
+  -- Extract debt load from the analysis JSONB so the table doesn't have to ship the whole blob.
+  (analysis->'debt_info'->>'stated_debt_amount_usd')::numeric AS debt_amount_usd,
   status, error_message, source_filename, uploaded_at`
 
 export async function GET(request: NextRequest) {

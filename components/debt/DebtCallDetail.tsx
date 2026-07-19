@@ -60,6 +60,46 @@ function ScorePill({ label, score, threshold = 70 }: { label: string; score: num
   )
 }
 
+function DebtLoadCard({ analysis }: { analysis: DebtAnalysis | null }) {
+  const info = analysis?.debt_info
+  const amount = info?.stated_debt_amount_usd ?? null
+  const threshold = info?.debt_meets_threshold ?? 'unclear'
+
+  const thresholdColor =
+    threshold === 'yes' ? 'var(--rb-green)' :
+    threshold === 'no'  ? 'var(--rb-red)' :
+    'var(--rb-text-3)'
+  const thresholdLabel =
+    threshold === 'yes' ? 'Meets threshold' :
+    threshold === 'no'  ? 'Under threshold' :
+    'Not disclosed'
+
+  return (
+    <div className="rounded-xl px-5 py-4 space-y-2" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
+      <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>Debt Load</p>
+      <p className="text-3xl font-bold tabular-nums leading-none" style={{ color: amount != null ? 'var(--rb-accent)' : 'var(--rb-text-3)' }}>
+        {amount != null ? `$${amount.toLocaleString()}` : '—'}
+      </p>
+      <p className="text-xs" style={{ color: thresholdColor }}>{thresholdLabel}</p>
+      {info?.debt_types?.length ? (
+        <div className="flex flex-wrap gap-1 pt-1">
+          {info.debt_types.map(t => (
+            <span key={t} className="text-[10px] px-1.5 py-0.5 rounded"
+                  style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}>
+              {t}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {info?.debt_amount_verbatim ? (
+        <p className="text-[11px] mt-1 italic" style={{ color: 'var(--rb-text-3)' }}>
+          &ldquo;{info.debt_amount_verbatim}&rdquo;
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-4 text-xs py-1.5" style={{ borderBottom: '1px solid var(--rb-border)' }}>
@@ -119,8 +159,8 @@ export function DebtCallDetail({ call, audioUrl }: { call: Call; audioUrl: strin
         </div>
       </div>
 
-      {/* Summary + Hangup */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {/* Summary + Hangup + Debt Load */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div className="rounded-xl px-5 py-4 space-y-2" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
           <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>Summary</p>
           <p className="text-sm leading-relaxed" style={{ color: 'var(--rb-text)' }}>
@@ -138,6 +178,7 @@ export function DebtCallDetail({ call, audioUrl }: { call: Call; audioUrl: strin
             </p>
           )}
         </div>
+        <DebtLoadCard analysis={analysis} />
       </div>
 
       {/* Compliance detail */}
@@ -200,6 +241,7 @@ export function DebtCallDetail({ call, audioUrl }: { call: Call; audioUrl: strin
           <DebtChatTranscript
             transcript={call.transcript as Parameters<typeof DebtChatTranscript>[0]['transcript']}
             transcriptText={call.transcript_text}
+            translatedTranscript={analysis?.translated_transcript ?? null}
           />
         </div>
 
@@ -221,21 +263,14 @@ export function DebtCallDetail({ call, audioUrl }: { call: Call; audioUrl: strin
             <KV k="Source file" v={<span className="text-[10px]">{call.source_filename ?? '—'}</span>} />
           </div>
 
-          {/* Debt info from analysis */}
+          {/* Interest (top card covers amount/threshold/types) */}
           {analysis?.debt_info && (
             <div className="rounded-xl px-5 py-4" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
-              <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--rb-text-3)' }}>Debt Info</p>
-              <KV k="Stated amount"
-                  v={analysis.debt_info.stated_debt_amount_usd != null
-                     ? `$${analysis.debt_info.stated_debt_amount_usd.toLocaleString()}`
-                     : '—'} />
-              <KV k="Meets threshold" v={<span className="capitalize">{analysis.debt_info.debt_meets_threshold}</span>} />
-              <KV k="Debt types"
-                  v={analysis.debt_info.debt_types.length ? analysis.debt_info.debt_types.join(', ') : '—'} />
-              <KV k="Interest verdict" v={<span className="capitalize">{analysis.debt_info.interest_verdict.replace(/_/g, ' ')}</span>} />
-              {analysis.debt_info.debt_amount_verbatim && (
+              <p className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--rb-text-3)' }}>Interest</p>
+              <KV k="Verdict" v={<span className="capitalize">{analysis.debt_info.interest_verdict.replace(/_/g, ' ')}</span>} />
+              {analysis.debt_info.interest_quote && (
                 <p className="text-xs mt-2 italic" style={{ color: 'var(--rb-text-3)' }}>
-                  &ldquo;{analysis.debt_info.debt_amount_verbatim}&rdquo;
+                  &ldquo;{analysis.debt_info.interest_quote}&rdquo;
                 </p>
               )}
             </div>

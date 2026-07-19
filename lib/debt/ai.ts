@@ -264,7 +264,8 @@ Return this exact JSON structure:
   },
   "flags": ["<flag>"],
   "flag_details": { "<flag>": "<one English sentence with verbatim Spanish evidence including speaker>" },
-  "coaching_notes": "<1-2 English sentences of actionable coaching for the agent, or null>"
+  "coaching_notes": "<1-2 English sentences of actionable coaching for the agent, or null>",
+  "translated_transcript": "<English translation of the ENTIRE transcript above, keeping the exact same line format: '[TIME] AGENT: text' or '[TIME] CALLER: text' on each line. Translate every line — do not skip or merge. Keep the timestamps identical to the source. If a line is a filler ('mhm', 'sí'), translate it literally. This is what the reviewer will read.>"
 }
 
 Return the JSON now.`

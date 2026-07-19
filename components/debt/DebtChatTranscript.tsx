@@ -9,29 +9,71 @@ type Transcript = {
   audio_duration?: number | null
 }
 
-function fmtSec(ms: number): string {
+type Message = { key: string; role: 'agent' | 'caller'; text: string; t: string }
+
+function fmtSecFromMs(ms: number): string {
   const s = Math.floor(ms / 1000)
   const m = Math.floor(s / 60)
   const r = s % 60
   return `${m}:${String(r).padStart(2, '0')}`
 }
 
-export function DebtChatTranscript({ transcript, transcriptText }: { transcript: Transcript | null; transcriptText: string | null }) {
-  const messages = useMemo(() => {
-    if (!transcript?.utterances?.length) return null
-    const agentChannel = transcript.agent_channel
-    return [...transcript.utterances]
-      .sort((a, b) => a.start - b.start)
-      .map((u, i) => ({
-        key: `${u.start}-${i}`,
-        role: u.channel === agentChannel ? ('agent' as const) : ('caller' as const),
-        text: u.text.trim(),
-        t: fmtSec(u.start),
-      }))
-  }, [transcript])
+/**
+ * Parse the LLM's English `translated_transcript` string, which uses the
+ * same "[time] AGENT: text" / "[time] CALLER: text" format as the source.
+ * We accept either seconds ("12.3s") or MM:SS in the time bracket.
+ */
+function parseTranslatedTranscript(text: string): Message[] {
+  const out: Message[] = []
+  const lineRe = /^\s*\[([^\]]+)\]\s*(AGENT|CALLER)\s*:\s*(.*)$/i
+  const lines = text.split(/\r?\n/)
+  let i = 0
+  for (const raw of lines) {
+    if (!raw.trim()) continue
+    const m = lineRe.exec(raw)
+    if (!m) continue
+    const [, tRaw, roleRaw, textRaw] = m
+    out.push({
+      key: `en-${i++}`,
+      role: roleRaw.toLowerCase() as 'agent' | 'caller',
+      text: textRaw.trim(),
+      t: tRaw.trim().replace(/s$/i, ''),
+    })
+  }
+  return out
+}
+
+export function DebtChatTranscript({
+  transcript,
+  transcriptText,
+  translatedTranscript,
+}: {
+  transcript: Transcript | null
+  transcriptText: string | null
+  translatedTranscript: string | null
+}) {
+  const messages = useMemo<Message[] | null>(() => {
+    // Prefer the LLM's English translation.
+    if (translatedTranscript?.trim()) {
+      const parsed = parseTranslatedTranscript(translatedTranscript)
+      if (parsed.length > 0) return parsed
+    }
+    // Fallback: raw utterances (still in Spanish) — only if English translation missing.
+    if (transcript?.utterances?.length) {
+      const agentChannel = transcript.agent_channel
+      return [...transcript.utterances]
+        .sort((a, b) => a.start - b.start)
+        .map((u, i) => ({
+          key: `orig-${u.start}-${i}`,
+          role: u.channel === agentChannel ? ('agent' as const) : ('caller' as const),
+          text: u.text.trim(),
+          t: fmtSecFromMs(u.start),
+        }))
+    }
+    return null
+  }, [transcript, translatedTranscript])
 
   if (!messages || messages.length === 0) {
-    // Fallback: show the labeled plaintext if we have it, or nothing yet.
     if (transcriptText) {
       return (
         <pre className="text-xs whitespace-pre-wrap font-mono px-4 py-3 rounded-md" style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-2)' }}>

@@ -80,6 +80,12 @@ export const DebtAnalysisSchema = z.object({
   flags: z.array(z.string()),
   flag_details: z.record(z.string(), z.string()),
   coaching_notes: z.string().nullable(),
+
+  // English translation of the whole labeled transcript, one line per utterance
+  // in the same "[time] AGENT: …" / "[time] CALLER: …" format. Rendered as the
+  // chat bubbles; the original Spanish stays in transcript.utterances for
+  // compliance auditing.
+  translated_transcript: z.string().nullable(),
 })
 
 export type DebtAnalysis = z.infer<typeof DebtAnalysisSchema>
