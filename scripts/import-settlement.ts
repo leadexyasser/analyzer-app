@@ -105,9 +105,17 @@ async function main() {
   if (!revKey) throw new Error(`No revenue column found. Columns: ${Object.keys(rows[0]).join(', ')}`)
   console.log(`Mapped: date=${dateKey} offer=${offerIdKey ?? '-'} conv=${convKey ?? '-'} revenue=${revKey}\n`)
 
+  // An export is a snapshot. Taken at 11am it holds a few hours of the current day, and
+  // importing that as settled would pin today's revenue to a partial figure while the
+  // real number keeps climbing — exactly what happened on 2026-10-29 ($112 settled
+  // against $364 actual). A day can only be settled once it is over.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  const partial: string[] = []
+
   const parsed = rows.flatMap(r => {
     const stat_date = toDate(r[dateKey])
     if (!stat_date) return []
+    if (stat_date >= today) { partial.push(stat_date); return [] }
     return [{
       stat_date,
       offer_id: offerIdKey ? String(r[offerIdKey] ?? 'all') : 'all',
@@ -117,10 +125,18 @@ async function main() {
     }]
   })
 
-  const skipped = rows.length - parsed.length
+  const skipped = rows.length - parsed.length - partial.length
   const total = parsed.reduce((a, r) => a + r.revenue, 0)
   const conv = parsed.reduce((a, r) => a + r.conversions, 0)
   const dates = parsed.map(r => r.stat_date).sort()
+  if (partial.length > 0) {
+    console.log(`Skipped ${partial.length} row(s) dated today or later (${[...new Set(partial)].join(', ')}) — a day in progress cannot be settled.`)
+  }
+  if (parsed.length === 0) {
+    console.log('Nothing to import.')
+    await pool.end()
+    return
+  }
   console.log(`${parsed.length} row(s) ready${skipped > 0 ? `, ${skipped} skipped (no date)` : ''}`)
   console.log(`Range ${dates[0]} → ${dates[dates.length - 1]}`)
   console.log(`Conversions ${conv.toLocaleString()}  Revenue $${total.toFixed(2)}\n`)
