@@ -40,6 +40,13 @@ function dayLabel(iso: string): string {
 
 const NEG = '#e5484d'
 
+// Where each day's revenue came from, worst to best authority.
+const SOURCE_LABEL: Record<string, string> = {
+  settled: 'settled',
+  webhook: 'Everflow live',
+  calls: 'call records',
+}
+
 /**
  * Re-syncs only when stored spend has gone stale, or on ?refresh=1. A Meta outage must
  * not blank the page, so failures surface as a banner over the last stored figures.
@@ -74,18 +81,23 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
       raw: a.raw + d.pixel_raw_calls,
       paid: a.paid + d.paid_calls,
       policies: a.policies + d.policies,
+      revEff: a.revEff + d.revenue_effective,
       rev28: a.rev28 + d.revenue_at_28,
       revActual: a.revActual + d.revenue_actual,
+      revWebhook: a.revWebhook + (d.revenue_webhook ?? 0),
+      revSettled: a.revSettled + (d.revenue_settled ?? 0),
     }),
-    { spend: 0, clicks: 0, raw: 0, paid: 0, policies: 0, rev28: 0, revActual: 0 }
+    { spend: 0, clicks: 0, raw: 0, paid: 0, policies: 0, revEff: 0, rev28: 0, revActual: 0, revWebhook: 0, revSettled: 0 }
   )
-  const netPool = t.rev28 - t.spend
+  const netPool = t.revEff - t.spend
   const activeDays = daily.filter(d => d.spend > 0).length
+  const settledDays = daily.filter(d => d.revenue_source === 'settled').length
+  const webhookDays = daily.filter(d => d.revenue_source === 'webhook').length
 
   // `daily` is newest-first; today is the most recent row inside the window.
   const today = daily[0]
-  const todayProfit = today ? today.revenue_at_28 - today.spend : 0
-  const prevPool = prevTotals.revenue_at_28 - prevTotals.spend
+  const todayProfit = today ? today.revenue_effective - today.spend : 0
+  const prevPool = prevTotals.revenue_effective - prevTotals.spend
 
   return (
     <main className="px-5 py-4 space-y-4">
@@ -124,7 +136,7 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
       {today && (
         <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <Stat label={`Spend · ${dayLabel(today.stat_date)}`} value={`$${money(today.spend, 0)}`} />
-          <Stat label="Revenue today · ISI @ $28" value={`$${money(today.revenue_at_28, 0)}`} />
+          <Stat label={`Revenue today · ${SOURCE_LABEL[today.revenue_source]}`} value={`$${money(today.revenue_effective, 0)}`} />
           <Stat label="Net profit today" value={`$${money(todayProfit, 0)}`} tone={todayProfit < 0 ? 'neg' : 'pos'} />
           <Stat label="ROI today" value={pct(ratio(todayProfit, today.spend))} tone={todayProfit < 0 ? 'neg' : 'pos'} />
           <Stat label="Conversions" value={`${today.paid_calls} / ${DAILY_CAP}`} tone={today.paid_calls >= DAILY_CAP ? 'pos' : undefined} />
@@ -140,7 +152,7 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr style={{ background: '#161b23' }}>
-                  {['DATE', 'SPEND', 'CLICKS', 'RAW', 'PAID', 'REVENUE', 'NET PROFIT', 'ROI', `YASSER ${YASSER_SHARE * 100}%`, `ECOMFY ${ECOMFY_SHARE * 100}%`]
+                  {['DATE', 'SPEND', 'CLICKS', 'RAW', 'PAID', 'REVENUE', 'SOURCE', 'CRM @ $28', 'Δ', 'NET PROFIT', 'ROI', `YASSER ${YASSER_SHARE * 100}%`, `ECOMFY ${ECOMFY_SHARE * 100}%`]
                     .map((h, i) => (
                       <th key={h} className={`px-3 py-2 text-[10px] font-semibold tracking-wider whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}
                         style={{ color: '#8b94a3' }}>{h}</th>
@@ -149,9 +161,12 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
               </thead>
               <tbody>
                 {daily.map(d => {
-                  const profit = d.revenue_at_28 - d.spend
+                  const profit = d.revenue_effective - d.spend
                   const idle = d.spend === 0 && d.paid_calls === 0
                   const neg = profit < 0
+                  // Gap between what the network credits and what the call log claims.
+                  // A negative number is revenue Ringba counted that Everflow did not.
+                  const variance = d.revenue_source === 'calls' ? null : d.revenue_effective - d.revenue_at_28
                   return (
                     <tr key={d.stat_date} style={{ borderTop: '1px solid #ffffff0d', opacity: idle ? 0.45 : 1 }}>
                       <Cell first>{dayLabel(d.stat_date)}</Cell>
@@ -159,7 +174,14 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
                       <Cell>{idle ? '—' : d.link_clicks.toLocaleString()}</Cell>
                       <Cell>{idle ? '—' : d.pixel_raw_calls.toLocaleString()}</Cell>
                       <Cell>{idle ? '—' : String(d.paid_calls)}</Cell>
+                      <Cell>{idle ? '—' : `$${money(d.revenue_effective)}`}</Cell>
+                      <Cell tone={d.revenue_source === 'settled' ? 'pos' : d.revenue_source === 'webhook' ? 'accent' : undefined}>
+                        {idle ? '—' : SOURCE_LABEL[d.revenue_source]}
+                      </Cell>
                       <Cell>{idle ? '—' : `$${money(d.revenue_at_28)}`}</Cell>
+                      <Cell tone={variance !== null && variance < 0 ? 'neg' : undefined}>
+                        {idle || variance === null ? '—' : `$${money(variance)}`}
+                      </Cell>
                       <Cell tone={neg ? 'neg' : undefined}>{idle ? '—' : `$${money(profit)}`}</Cell>
                       <Cell tone={neg ? 'neg' : undefined}>{idle ? '—' : pct(ratio(profit, d.spend))}</Cell>
                       <Cell tone={neg ? 'neg' : undefined}>{idle ? '—' : `$${money(profit * YASSER_SHARE)}`}</Cell>
@@ -175,7 +197,10 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
                   <Cell bold>{t.clicks.toLocaleString()}</Cell>
                   <Cell bold>{t.raw.toLocaleString()}</Cell>
                   <Cell bold>{t.paid}</Cell>
+                  <Cell bold>${money(t.revEff)}</Cell>
+                  <Cell bold>{settledDays > 0 || webhookDays > 0 ? `${settledDays}s / ${webhookDays}w` : '—'}</Cell>
                   <Cell bold>${money(t.rev28)}</Cell>
+                  <Cell bold tone={t.revEff - t.rev28 < 0 ? 'neg' : undefined}>${money(t.revEff - t.rev28)}</Cell>
                   <Cell bold tone={netPool < 0 ? 'neg' : undefined}>${money(netPool)}</Cell>
                   <Cell bold tone={netPool < 0 ? 'neg' : undefined}>{pct(ratio(netPool, t.spend))}</Cell>
                   <Cell bold>${money(netPool * YASSER_SHARE)}</Cell>
@@ -200,10 +225,17 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
 
           <SummaryPanel title={`${win.label.split(' ')[0].toUpperCase()} MONTH TO DATE`}>
             <Line label="Total ad spend" value={`$${money(t.spend)}`} />
-            <Line label="Revenue · ISI @ $28" value={`$${money(t.rev28)}`} />
-            <Line label="Revenue · as billed" value={`$${money(t.revActual)}`} muted />
+            <Line label="Revenue · booked" value={`$${money(t.revEff)}`} strong />
             <Line label="Net profit pool" value={`$${money(netPool)}`} strong tone={netPool < 0 ? 'neg' : undefined} />
             <Line label="ROI" value={pct(ratio(netPool, t.spend))} strong tone={netPool < 0 ? 'neg' : undefined} />
+          </SummaryPanel>
+
+          <SummaryPanel title="REVENUE SOURCES">
+            <Line label={`Settled export · ${settledDays} day${settledDays === 1 ? '' : 's'}`} value={t.revSettled > 0 ? `$${money(t.revSettled)}` : '—'} tone={t.revSettled > 0 ? 'accent' : undefined} />
+            <Line label={`Everflow live · ${webhookDays} day${webhookDays === 1 ? '' : 's'}`} value={t.revWebhook > 0 ? `$${money(t.revWebhook)}` : '—'} />
+            <Line label="Call records · ISI @ $28" value={`$${money(t.rev28)}`} muted />
+            <Line label="Call records · as billed" value={`$${money(t.revActual)}`} muted />
+            <Line label="Booked vs call records" value={`$${money(t.revEff - t.rev28)}`} tone={t.revEff - t.rev28 < 0 ? 'neg' : undefined} />
           </SummaryPanel>
 
           <SummaryPanel title={`PROFIT SPLIT · ${YASSER_SHARE * 100} / ${ECOMFY_SHARE * 100}`}>

@@ -14,6 +14,16 @@ const ISI_BUYER_PREFIX = 'Insurance Supermarket%'
 // Spend is considered stale after this, at which point the page re-syncs on load.
 export const STALE_AFTER_MINUTES = 30
 
+/**
+ * First date the Everflow postback covered a whole day.
+ *
+ * The postback went live mid-morning on 2026-10-29, so that day's webhook total only
+ * covers part of it and would badly understate revenue if treated as the day's figure.
+ * On and after this date the webhook is the live revenue source; before it, call
+ * records are. Settled export rows override both, on any date.
+ */
+export const WEBHOOK_FULL_DAYS_FROM = '2026-10-30'
+
 export type DailyRow = {
   stat_date: string
   spend: number
@@ -25,6 +35,15 @@ export type DailyRow = {
   policies: number
   revenue_actual: number
   revenue_at_28: number
+  /** Live postback total. Null before the webhook existed. */
+  revenue_webhook: number | null
+  webhook_conversions: number | null
+  /** Imported export total. Null until that day has been settled. */
+  revenue_settled: number | null
+  settled_conversions: number | null
+  /** The figure the P&L uses: settled, else webhook, else call records. */
+  revenue_effective: number
+  revenue_source: 'settled' | 'webhook' | 'calls'
 }
 
 export type CreativeRow = {
@@ -78,6 +97,22 @@ call_agg as (
   where campaign_name = $3
     and (call_started_at at time zone '${ET}')::date between $1::date and $2::date
   group by 1
+),
+webhook as (
+  -- A rejected or reversed conversion is excluded rather than deleted, so a later
+  -- status change removes it from revenue without losing the record of it.
+  select (converted_at at time zone '${ET}')::date as stat_date,
+         sum(coalesce(payout, 0))                   as revenue,
+         count(*)                                   as conversions
+  from network_conversions
+  where converted_at is not null
+    and coalesce(lower(status), '') not in ('rejected', 'reversed', 'declined', 'invalid')
+  group by 1
+),
+settled as (
+  select stat_date, sum(revenue) as revenue, sum(conversions) as conversions
+  from network_settlement_daily
+  group by stat_date
 )
 select to_char(d.stat_date, 'YYYY-MM-DD')          as stat_date,
        coalesce(s.spend, 0)::float8                as spend,
@@ -88,10 +123,27 @@ select to_char(d.stat_date, 'YYYY-MM-DD')          as stat_date,
        coalesce(c.paid_calls, 0)::int              as paid_calls,
        coalesce(c.policies, 0)::int                as policies,
        coalesce(c.revenue_actual, 0)::float8       as revenue_actual,
-       coalesce(c.revenue_at_28, 0)::float8        as revenue_at_28
+       coalesce(c.revenue_at_28, 0)::float8        as revenue_at_28,
+       w.revenue::float8                           as revenue_webhook,
+       w.conversions::int                          as webhook_conversions,
+       t.revenue::float8                           as revenue_settled,
+       t.conversions::int                          as settled_conversions,
+       coalesce(
+         t.revenue,
+         case when d.stat_date >= $5::date then w.revenue end,
+         c.revenue_at_28,
+         0
+       )::float8                                   as revenue_effective,
+       case
+         when t.revenue is not null then 'settled'
+         when d.stat_date >= $5::date and w.revenue is not null then 'webhook'
+         else 'calls'
+       end                                         as revenue_source
 from days d
 left join spend    s on s.stat_date = d.stat_date
 left join call_agg c on c.stat_date = d.stat_date
+left join webhook  w on w.stat_date = d.stat_date
+left join settled  t on t.stat_date = d.stat_date
 order by d.stat_date desc
 `
 
@@ -121,7 +173,7 @@ export function previousMonth(month: string): string {
 }
 
 export async function fetchDaily(campaignScope: string, since: string, until: string): Promise<DailyRow[]> {
-  return many<DailyRow>(DAILY_SQL, [since, until, campaignScope, ISI_BUYER_PREFIX])
+  return many<DailyRow>(DAILY_SQL, [since, until, campaignScope, ISI_BUYER_PREFIX, WEBHOOK_FULL_DAYS_FROM])
 }
 
 /**
@@ -203,7 +255,13 @@ export async function fetchHooks(since: string, until: string): Promise<HookRow[
   return many<HookRow>(HOOKS_SQL, [since, until])
 }
 
-export type MonthTotals = { spend: number; revenue_at_28: number; revenue_actual: number; paid_calls: number }
+export type MonthTotals = {
+  spend: number
+  revenue_effective: number
+  revenue_at_28: number
+  revenue_actual: number
+  paid_calls: number
+}
 
 /** Month totals on their own, for the previous-month carry-forward panel. */
 export async function fetchMonthTotals(campaignScope: string, month: string): Promise<MonthTotals> {
@@ -212,11 +270,12 @@ export async function fetchMonthTotals(campaignScope: string, month: string): Pr
   return rows.reduce(
     (a, d) => ({
       spend: a.spend + d.spend,
+      revenue_effective: a.revenue_effective + d.revenue_effective,
       revenue_at_28: a.revenue_at_28 + d.revenue_at_28,
       revenue_actual: a.revenue_actual + d.revenue_actual,
       paid_calls: a.paid_calls + d.paid_calls,
     }),
-    { spend: 0, revenue_at_28: 0, revenue_actual: 0, paid_calls: 0 }
+    { spend: 0, revenue_effective: 0, revenue_at_28: 0, revenue_actual: 0, paid_calls: 0 }
   )
 }
 
