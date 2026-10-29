@@ -11,11 +11,30 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   {
-    label: 'Final Expense',
-    href: '/dashboard',
+    label: 'FE · Spanish',
+    href: '/dashboard/spanish',
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
         <path d="M2 2h12v2H2zM2 7h12v2H2zM2 12h8v2H2z" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    label: 'FE · English',
+    href: '/dashboard/english',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="2" y="3" width="12" height="10" rx="1.5" />
+        <path d="M2 6h12M6 3v10" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    label: 'Analysis',
+    href: '/dashboard/analysis',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M2 13V9M6 13V4M10 13V7M14 13V2" strokeLinecap="round" />
       </svg>
     ),
   },

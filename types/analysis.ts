@@ -55,6 +55,23 @@ export const FinalExpenseQualifierSchema = z.object({
   misleading_ad_mention: z.boolean(),
   misleading_quotes: z.array(z.string()),
 
+  // ── Enrollment evidence (Pattern B / RTT close detection) ────────────────
+  // Present on all analyses going forward; optional so historical rows still validate.
+  enrollment_evidence: z.object({
+    policy_number_issued: z.boolean(),
+    policy_number: z.string().nullable(),
+    payment_digits_read: z.boolean(),
+    billing_date_confirmed: z.boolean(),
+    billing_date: z.string().nullable(),
+    closer_congratulations: z.boolean(),
+    premium_amount_locked: z.boolean(),
+    premium_amount: z.string().nullable(),
+    licensed_advisor_present: z.boolean(),
+    licensed_advisor_name: z.string().nullable(),
+    close_confidence: z.enum(['none', 'weak', 'moderate', 'strong']),
+    evidence_quotes: z.array(z.string()),
+  }).optional().nullable(),
+
   // ── Overall ──────────────────────────────────────────────────────────────
   qualifier_score: z.number().int().min(0).max(100),
   qualifier_verdict: z.enum(['qualified', 'borderline', 'disqualified', 'compliance_risk']),
@@ -77,6 +94,29 @@ export const ValidFlags = [
 
 export type ValidFlag = (typeof ValidFlags)[number]
 
+// RTT-specific objection tags — closed enum so the LLM can't invent new categories.
+// These reflect the actual failure modes we've observed on Spanish FE RTT calls.
+export const RttObjectionTags = [
+  'family_consult_needed',       // "let me talk to my hija/esposo/familia first" — HIGH intent, callback likely
+  'existing_cheaper_policy',     // caller has prior FE at a lower rate → advisor pushed replacement wrong
+  'ssn_not_available',           // caller doesn't have SSN handy — pre-qual gap on our side
+  'bank_info_declined',          // caller flat refused to give routing/account
+  'time_conflict',               // caller had a hard time constraint (work, appointment, family event)
+  'trust_hesitation',            // fraud-wary but not accusing — normal protective behavior
+  'medical_disqualification',    // failed underwriting (health, age, prescriptions)
+  'affordability_concern',       // premium too high for stated income
+  'audio_quality_issue',         // call kept dropping / muffled
+  'advisor_transfer_delayed',    // qualifier stalled → caller lost patience before licensed advisor arrived
+  'callback_scheduled_positive', // active callback commitment with specific time — pipeline, not loss
+] as const
+
+export type RttObjectionTag = (typeof RttObjectionTags)[number]
+
+// Campaign type gates which prompt block runs. rtt_spanish uses the licensed-advisor-close rules;
+// in_call_close uses the traditional agent-closes-on-call rules. Anything else falls back to base.
+export const CampaignTypes = ['rtt_spanish', 'in_call_close', 'debt', 'other'] as const
+export type CampaignType = (typeof CampaignTypes)[number]
+
 export const CallOutcomeEnum = z.enum([
   'transferred',
   'qualified_no_transfer',
@@ -92,6 +132,17 @@ export const CallOutcomeEnum = z.enum([
 export const AnalysisSchema = z.object({
   summary: z.string(),
   language: z.enum(['en', 'es', 'mixed', 'other']),
+  // RTT/Spanish-FE fields — optional so historical rows without them still validate.
+  campaign_type: z.enum(CampaignTypes).optional().nullable(),
+  // The LLM occasionally invents adjacent tag names (e.g. "misleading_ad_mention" — which is
+  // a compliance flag, not an objection). Accept any string array and filter to the allowed
+  // enum values at parse time so one hallucinated tag doesn't kill the whole analysis.
+  objection_tags: z.array(z.string()).optional().nullable().transform(
+    (arr) => arr?.filter((t): t is RttObjectionTag => (RttObjectionTags as readonly string[]).includes(t)) ?? null
+  ),
+  // 0-10 rating of how cleanly the qualifier handed off to the licensed advisor.
+  // Only meaningful when campaign_type = 'rtt_spanish' AND a transfer happened.
+  handoff_smoothness: z.number().int().min(0).max(10).optional().nullable(),
   // agent_speaker removed — now determined by channel separation, not LLM inference
   agent_speaker: z.enum(['Speaker A', 'Speaker B', 'AGENT', 'CALLER', 'unclear']).optional().nullable(),
   quality_score: z.number().int().min(0).max(100),

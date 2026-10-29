@@ -6,6 +6,7 @@ import { Analysis } from '@/types/analysis'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { TranscriptViewer } from '@/components/TranscriptViewer'
 import { FinalExpenseCard } from '@/components/FinalExpenseCard'
+import { isPrematureHangup } from '@/lib/fe-scoring'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ReanalyzeButton } from '@/components/ReanalyzeButton'
@@ -99,6 +100,12 @@ export function CallDetail({ call, audioUrl }: Props) {
   const [currentTime, setCurrentTime] = useState(0)
   const router = useRouter()
   const analysis = call.analysis as Analysis | null
+  // Premature hangups have no meaningful qualifier signal — suppress the misleading
+  // "0/100 disqualified" ring and Lead Intent "0" display in favor of neutral "—".
+  const skipScoring = isPrematureHangup({
+    call_outcome: (analysis as unknown as { call_outcome?: string | null })?.call_outcome ?? null,
+    flags: (analysis as unknown as { flags?: string[] | null })?.flags ?? call.flags ?? null,
+  })
 
   const handleRetry = async () => {
     setRetrying(true)
@@ -175,14 +182,16 @@ export function CallDetail({ call, audioUrl }: Props) {
           { label: 'Revenue', value: money(call.revenue), color: '#12b76a', sub: `Payout ${money(call.payout)}` },
           { label: 'Duration', value: dur(call.duration_seconds), color: 'var(--rb-text)', sub: `${call.duration_seconds ?? 0}s` },
           {
-            label: 'Quality Score', value: analysis ? String(analysis.quality_score) : '—',
-            color: analysis ? (analysis.quality_score >= 70 ? '#12b76a' : analysis.quality_score >= 40 ? '#f79009' : '#f04438') : 'var(--rb-text-3)',
-            sub: 'out of 100',
+            label: 'Quality Score',
+            value: !analysis ? '—' : skipScoring ? '—' : String(analysis.quality_score),
+            color: !analysis || skipScoring ? 'var(--rb-text-3)' : (analysis.quality_score >= 70 ? '#12b76a' : analysis.quality_score >= 40 ? '#f79009' : '#f04438'),
+            sub: skipScoring ? 'premature hangup' : 'out of 100',
           },
           {
-            label: 'Lead Intent', value: analysis?.lead_intent ? String(analysis.lead_intent.score) : '—',
-            color: analysis?.lead_intent ? (analysis.lead_intent.score >= 70 ? '#12b76a' : analysis.lead_intent.score >= 40 ? '#f79009' : '#f04438') : 'var(--rb-text-3)',
-            sub: analysis?.lead_intent?.verdict ?? 'not analyzed',
+            label: 'Lead Intent',
+            value: !analysis?.lead_intent ? '—' : skipScoring ? '—' : String(analysis.lead_intent.score),
+            color: !analysis?.lead_intent || skipScoring ? 'var(--rb-text-3)' : (analysis.lead_intent.score >= 70 ? '#12b76a' : analysis.lead_intent.score >= 40 ? '#f79009' : '#f04438'),
+            sub: skipScoring ? 'no caller speech' : (analysis?.lead_intent?.verdict ?? 'not analyzed'),
           },
         ].map(item => (
           <div key={item.label} className="rounded-xl px-5 py-4" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
@@ -261,7 +270,13 @@ export function CallDetail({ call, audioUrl }: Props) {
           {/* Final Expense */}
           {analysis?.final_expense ? (
             <Panel title="Final Expense Qualifier">
-              <FinalExpenseCard data={analysis.final_expense} />
+              <FinalExpenseCard
+                data={analysis.final_expense}
+                callContext={{
+                  call_outcome: (analysis as any)?.call_outcome ?? null,
+                  flags: (analysis as any)?.flags ?? call.flags ?? null,
+                }}
+              />
             </Panel>
           ) : analysis && (
             <div
@@ -303,28 +318,51 @@ export function CallDetail({ call, audioUrl }: Props) {
 
               {/* Quality */}
               <Panel title="Quality Score">
-                <div className="flex items-center gap-5">
-                  <Ring score={analysis.quality_score} />
-                  <div className="flex-1 space-y-2">
-                    {Object.entries(analysis.quality_breakdown).map(([k, v]) => (
-                      <div key={k} className="flex items-center gap-2">
-                        <span className="text-[11px] w-36 shrink-0 capitalize" style={{ color: 'var(--rb-text-3)' }}>{k.replace(/_/g, ' ')}</span>
-                        <div className="flex-1 rounded-full h-1.5" style={{ background: 'var(--rb-border)' }}>
-                          <div
-                            className="h-1.5 rounded-full"
-                            style={{ width: `${(v as number / 10) * 100}%`, background: qBreakColor(v as number) }}
-                          />
-                        </div>
-                        <span className="text-xs font-semibold w-7 text-right" style={{ color: 'var(--rb-text-2)' }}>{v as number}</span>
-                      </div>
-                    ))}
+                {skipScoring ? (
+                  <div className="flex items-start gap-3 px-4 py-3 rounded-xl" style={{ background: '#141e2d', border: '1px solid #1e2d40' }}>
+                    <span className="text-xl shrink-0">⏱</span>
+                    <div>
+                      <p className="text-xs font-bold" style={{ color: '#7a8fa6' }}>Not scored</p>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--rb-text-3)' }}>
+                        Call ended before the caller spoke — no engagement or handling signal to evaluate.
+                      </p>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-5">
+                    <Ring score={analysis.quality_score} />
+                    <div className="flex-1 space-y-2">
+                      {Object.entries(analysis.quality_breakdown).map(([k, v]) => (
+                        <div key={k} className="flex items-center gap-2">
+                          <span className="text-[11px] w-36 shrink-0 capitalize" style={{ color: 'var(--rb-text-3)' }}>{k.replace(/_/g, ' ')}</span>
+                          <div className="flex-1 rounded-full h-1.5" style={{ background: 'var(--rb-border)' }}>
+                            <div
+                              className="h-1.5 rounded-full"
+                              style={{ width: `${(v as number / 10) * 100}%`, background: qBreakColor(v as number) }}
+                            />
+                          </div>
+                          <span className="text-xs font-semibold w-7 text-right" style={{ color: 'var(--rb-text-2)' }}>{v as number}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </Panel>
 
               {/* Lead Intent */}
               {analysis.lead_intent && (
                 <Panel title="Lead Intent">
+                  {skipScoring ? (
+                    <div className="flex items-start gap-3 px-4 py-3 rounded-xl" style={{ background: '#141e2d', border: '1px solid #1e2d40' }}>
+                      <span className="text-xl shrink-0">⏱</span>
+                      <div>
+                        <p className="text-xs font-bold" style={{ color: '#7a8fa6' }}>Not scored</p>
+                        <p className="text-xs mt-0.5" style={{ color: 'var(--rb-text-3)' }}>
+                          Caller hung up before speaking — no intent signal to establish.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
                   <div className="space-y-3">
                     <div className="flex items-center gap-4">
                       <Ring score={analysis.lead_intent.score} />
@@ -376,6 +414,7 @@ export function CallDetail({ call, audioUrl }: Props) {
                       </div>
                     )}
                   </div>
+                  )}
                 </Panel>
               )}
 

@@ -8,7 +8,7 @@ import { Call } from '@/types/database'
 import { ReanalyzeButton } from '@/components/ReanalyzeButton'
 import { Analysis } from '@/types/analysis'
 import { ChevronDown, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
-import { computeFELeadQuality, hasComplianceIssue, COMPLIANCE_FLAG_LABELS } from '@/lib/fe-scoring'
+import { computeFELeadQuality, hasComplianceIssue, isPrematureHangup, COMPLIANCE_FLAG_LABELS } from '@/lib/fe-scoring'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -151,7 +151,14 @@ function RevenueEditor({ callId, initial }: { callId: string; initial: number | 
 function ExpandedRow({ call }: { call: Partial<Call> }) {
   const analysis = call.analysis as Analysis | null
   const fe = (analysis as any)?.final_expense
-  const feLeadQuality = computeFELeadQuality(fe)
+  const skipScoring = isPrematureHangup({
+    call_outcome: (analysis as any)?.call_outcome,
+    flags: (analysis as any)?.flags ?? call.flags ?? null,
+  })
+  const feLeadQuality = computeFELeadQuality(fe, {
+    call_outcome: (analysis as any)?.call_outcome,
+    flags: (analysis as any)?.flags ?? call.flags ?? null,
+  })
   const complianceClean = fe ? !hasComplianceIssue(fe) : null
   const complianceFlagList = fe
     ? Object.entries(COMPLIANCE_FLAG_LABELS).filter(([key]) => fe[key]).map(([, label]) => label)
@@ -185,6 +192,34 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                   </div>
                 ) : null
               }
+              // Premature hangups shouldn't show a "disqualified · 0/100" verdict — the score
+              // is undefined, not bad. Render a neutral "not scored" panel instead.
+              const prematureHangup = isPrematureHangup({
+                call_outcome: (analysis as any)?.call_outcome,
+                flags: (analysis as any)?.flags ?? call.flags ?? null,
+              })
+              if (prematureHangup) {
+                return (
+                  <div
+                    className="rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-4"
+                    style={{ background: '#141e2d', border: '1px solid #1e2d40' }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg">⏱</span>
+                      <div>
+                        <p className="text-xs font-bold" style={{ color: '#7a8fa6' }}>
+                          Final Expense: not scored
+                        </p>
+                        <p className="text-xs mt-0.5" style={{ color: 'var(--rb-text-3)' }}>
+                          {fe.qualifier_summary || 'Call ended before caller spoke — no qualification signal to assess.'}
+                        </p>
+                      </div>
+                    </div>
+                    <ReanalyzeButton callId={call.id!} size="sm" />
+                  </div>
+                )
+              }
+
               const MAP: Record<string, [string, string, string]> = {
                 qualified:       ['var(--rb-qualified-bg)', 'var(--rb-qualified-border)', '#12b76a'],
                 borderline:      ['#1c1204', 'var(--rb-borderline-border)', '#f79009'],
@@ -299,19 +334,31 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                 <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
                   Final Expense
                 </span>
-                <span
-                  className="text-xs font-bold px-2 py-0.5 rounded-md"
-                  style={{
-                    background: fe.qualifier_verdict === 'qualified' ? '#0d2e1e'
-                      : fe.qualifier_verdict === 'borderline' ? 'var(--rb-borderline-bg)'
-                      : 'var(--rb-disqualified-bg)',
-                    color: fe.qualifier_verdict === 'qualified' ? '#12b76a'
-                      : fe.qualifier_verdict === 'borderline' ? '#f79009'
-                      : '#f04438',
-                  }}
-                >
-                  {fe.qualifier_verdict.replace('_', ' ')} · {fe.qualifier_score}/100
-                </span>
+                {isPrematureHangup({
+                  call_outcome: (analysis as any)?.call_outcome,
+                  flags: (analysis as any)?.flags ?? call.flags ?? null,
+                }) ? (
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded-md"
+                    style={{ background: 'var(--rb-surface-2)', color: 'var(--rb-text-3)' }}
+                  >
+                    not scored
+                  </span>
+                ) : (
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded-md"
+                    style={{
+                      background: fe.qualifier_verdict === 'qualified' ? '#0d2e1e'
+                        : fe.qualifier_verdict === 'borderline' ? 'var(--rb-borderline-bg)'
+                        : 'var(--rb-disqualified-bg)',
+                      color: fe.qualifier_verdict === 'qualified' ? '#12b76a'
+                        : fe.qualifier_verdict === 'borderline' ? '#f79009'
+                        : '#f04438',
+                    }}
+                  >
+                    {fe.qualifier_verdict.replace('_', ' ')} · {fe.qualifier_score}/100
+                  </span>
+                )}
                 {fe.age_mentioned && (
                   <span className="text-xs" style={{ color: 'var(--rb-text-2)' }}>
                     Age: <strong style={{ color: 'var(--rb-text)' }}>{fe.age_mentioned}</strong>
@@ -415,38 +462,46 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
                   Quality Score
                 </p>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 rounded-full h-2" style={{ background: 'var(--rb-border)' }}>
-                    <div
-                      className="h-2 rounded-full"
-                      style={{
-                        width: `${analysis.quality_score}%`,
-                        background: analysis.quality_score >= 70 ? 'var(--rb-green)' : analysis.quality_score >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)',
-                      }}
-                    />
-                  </div>
-                  <span
-                    className="text-base font-bold tabular-nums w-10 text-right"
-                    style={{ color: analysis.quality_score >= 70 ? 'var(--rb-green)' : analysis.quality_score >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)' }}
-                  >
-                    {analysis.quality_score}
-                  </span>
-                </div>
-                {Object.entries(analysis.quality_breakdown).map(([k, v]) => (
-                  <div key={k} className="flex items-center gap-2 text-xs">
-                    <span className="w-36 shrink-0 capitalize" style={{ color: 'var(--rb-text-3)' }}>{k.replace(/_/g, ' ')}</span>
-                    <div className="flex-1 rounded-full h-1" style={{ background: 'var(--rb-border)' }}>
-                      <div
-                        className="h-1 rounded-full"
-                        style={{
-                          width: `${(v as number / 10) * 100}%`,
-                          background: (v as number) >= 7 ? 'var(--rb-green)' : (v as number) >= 4 ? 'var(--rb-amber)' : 'var(--rb-red)',
-                        }}
-                      />
+                {skipScoring ? (
+                  <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>
+                    ⏱ Not scored — call ended before caller spoke.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 rounded-full h-2" style={{ background: 'var(--rb-border)' }}>
+                        <div
+                          className="h-2 rounded-full"
+                          style={{
+                            width: `${analysis.quality_score}%`,
+                            background: analysis.quality_score >= 70 ? 'var(--rb-green)' : analysis.quality_score >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)',
+                          }}
+                        />
+                      </div>
+                      <span
+                        className="text-base font-bold tabular-nums w-10 text-right"
+                        style={{ color: analysis.quality_score >= 70 ? 'var(--rb-green)' : analysis.quality_score >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)' }}
+                      >
+                        {analysis.quality_score}
+                      </span>
                     </div>
-                    <span className="w-6 text-right font-medium" style={{ color: 'var(--rb-text-2)' }}>{v as number}</span>
-                  </div>
-                ))}
+                    {Object.entries(analysis.quality_breakdown).map(([k, v]) => (
+                      <div key={k} className="flex items-center gap-2 text-xs">
+                        <span className="w-36 shrink-0 capitalize" style={{ color: 'var(--rb-text-3)' }}>{k.replace(/_/g, ' ')}</span>
+                        <div className="flex-1 rounded-full h-1" style={{ background: 'var(--rb-border)' }}>
+                          <div
+                            className="h-1 rounded-full"
+                            style={{
+                              width: `${(v as number / 10) * 100}%`,
+                              background: (v as number) >= 7 ? 'var(--rb-green)' : (v as number) >= 4 ? 'var(--rb-amber)' : 'var(--rb-red)',
+                            }}
+                          />
+                        </div>
+                        <span className="w-6 text-right font-medium" style={{ color: 'var(--rb-text-2)' }}>{v as number}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
 
@@ -458,29 +513,37 @@ function ExpandedRow({ call }: { call: Partial<Call> }) {
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--rb-text-3)' }}>
                   Lead Intent
                 </p>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 rounded-full h-2" style={{ background: 'var(--rb-border)' }}>
-                    <div
-                      className="h-2 rounded-full"
-                      style={{
-                        width: `${analysis.lead_intent.score}%`,
-                        background: analysis.lead_intent.score >= 70 ? 'var(--rb-green)' : analysis.lead_intent.score >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)',
-                      }}
-                    />
-                  </div>
-                  <span className="text-base font-bold tabular-nums w-10 text-right" style={{ color: 'var(--rb-text)' }}>
-                    {analysis.lead_intent.score}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <IntentBadge verdict={analysis.lead_intent.verdict} />
-                  {analysis.call_outcome === 'sale_closed'
-                    ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-qualified-bg)', color: '#12b76a', border: '1px solid #0d3321' }}>✓ Sale Closed</span>
-                    : <span className="text-[10px] px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-surface)', color: 'var(--rb-text-3)', border: '1px solid var(--rb-border)' }}>Not closed</span>
-                  }
-                </div>
-                {analysis.lead_intent.misalignment_reason && (
-                  <p className="text-xs italic" style={{ color: 'var(--rb-amber)' }}>{analysis.lead_intent.misalignment_reason}</p>
+                {skipScoring ? (
+                  <p className="text-xs" style={{ color: 'var(--rb-text-3)' }}>
+                    ⏱ Not scored — no caller speech captured.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 rounded-full h-2" style={{ background: 'var(--rb-border)' }}>
+                        <div
+                          className="h-2 rounded-full"
+                          style={{
+                            width: `${analysis.lead_intent.score}%`,
+                            background: analysis.lead_intent.score >= 70 ? 'var(--rb-green)' : analysis.lead_intent.score >= 40 ? 'var(--rb-amber)' : 'var(--rb-red)',
+                          }}
+                        />
+                      </div>
+                      <span className="text-base font-bold tabular-nums w-10 text-right" style={{ color: 'var(--rb-text)' }}>
+                        {analysis.lead_intent.score}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <IntentBadge verdict={analysis.lead_intent.verdict} />
+                      {analysis.call_outcome === 'sale_closed'
+                        ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-qualified-bg)', color: '#12b76a', border: '1px solid #0d3321' }}>✓ Sale Closed</span>
+                        : <span className="text-[10px] px-2 py-0.5 rounded-md" style={{ background: 'var(--rb-surface)', color: 'var(--rb-text-3)', border: '1px solid var(--rb-border)' }}>Not closed</span>
+                      }
+                    </div>
+                    {analysis.lead_intent.misalignment_reason && (
+                      <p className="text-xs italic" style={{ color: 'var(--rb-amber)' }}>{analysis.lead_intent.misalignment_reason}</p>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -496,12 +559,12 @@ const TOTAL_COLS = 16 // 15 data cols + 1 expand chevron col
 // ── filters ───────────────────────────────────────────────────────────────────
 
 interface Filters {
-  status: string; campaign: string; publisher: string; target_name: string
+  status: string; campaign: string; utm_campaign: string; publisher: string; target_name: string
   caller_id: string; end_call_source: string; is_duplicate: string
   min_score: string; max_score: string; from: string; to: string
 }
 const EMPTY: Filters = {
-  status: '', campaign: '', publisher: '', target_name: '',
+  status: '', campaign: '', utm_campaign: '', publisher: '', target_name: '',
   caller_id: '', end_call_source: '', is_duplicate: '',
   min_score: '', max_score: '', from: '', to: '',
 }
@@ -569,6 +632,7 @@ function FiltersPanel({ filters, onChange, onReset }: {
         <p style={sectionLabel}>Call Info</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2">
           <DarkInput placeholder="Campaign" value={filters.campaign} onChange={v => onChange('campaign', v)} />
+          <DarkInput placeholder="utm_campaign" value={filters.utm_campaign} onChange={v => onChange('utm_campaign', v)} />
           <DarkInput placeholder="Publisher / Source" value={filters.publisher} onChange={v => onChange('publisher', v)} />
           <DarkInput placeholder="Target name" value={filters.target_name} onChange={v => onChange('target_name', v)} />
           <DarkInput placeholder="Caller ID" value={filters.caller_id} onChange={v => onChange('caller_id', v)} />
@@ -624,7 +688,7 @@ function FiltersPanel({ filters, onChange, onReset }: {
 
 // ── main ─────────────────────────────────────────────────────────────────────
 
-export function CallsTable({ dateFrom, dateTo, publisherScope = '' }: { dateFrom: string; dateTo: string; publisherScope?: string }) {
+export function CallsTable({ dateFrom, dateTo, publisherScope = '', campaignScope = '' }: { dateFrom: string; dateTo: string; publisherScope?: string; campaignScope?: string }) {
   const [calls, setCalls] = useState<Partial<Call>[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -635,22 +699,24 @@ export function CallsTable({ dateFrom, dateTo, publisherScope = '' }: { dateFrom
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Reset to page 1 when the date range or publisher scope changes
-  const prevRangeRef = useRef(`${dateFrom}|${dateTo}|${publisherScope}`)
+  const prevRangeRef = useRef(`${dateFrom}|${dateTo}|${publisherScope}|${campaignScope}`)
   useEffect(() => {
-    const key = `${dateFrom}|${dateTo}|${publisherScope}`
+    const key = `${dateFrom}|${dateTo}|${publisherScope}|${campaignScope}`
     if (key !== prevRangeRef.current) {
       prevRangeRef.current = key
       setPage(1)
       setFilters(EMPTY)
     }
-  }, [dateFrom, dateTo, publisherScope])
+  }, [dateFrom, dateTo, publisherScope, campaignScope])
 
-  const fetchCalls = useCallback(async (p: number, f: Filters, from: string, to: string, pubScope: string) => {
+  const fetchCalls = useCallback(async (p: number, f: Filters, from: string, to: string, pubScope: string, campScope: string) => {
     setLoading(true)
     const params = new URLSearchParams({ page: String(p) })
     if (pubScope) params.set('publisher_scope', pubScope)
+    if (campScope) params.set('campaign_scope', campScope)
     if (f.status) params.set('status', f.status)
     if (f.campaign) params.set('campaign', f.campaign)
+    if (f.utm_campaign) params.set('utm_campaign', f.utm_campaign)
     if (f.publisher) params.set('publisher', f.publisher)
     if (f.target_name) params.set('target_name', f.target_name)
     if (f.caller_id) params.set('caller_id', f.caller_id)
@@ -671,9 +737,9 @@ export function CallsTable({ dateFrom, dateTo, publisherScope = '' }: { dateFrom
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => fetchCalls(page, filters, dateFrom, dateTo, publisherScope), 300)
+    debounceRef.current = setTimeout(() => fetchCalls(page, filters, dateFrom, dateTo, publisherScope, campaignScope), 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [page, filters, fetchCalls, dateFrom, dateTo, publisherScope])
+  }, [page, filters, fetchCalls, dateFrom, dateTo, publisherScope, campaignScope])
 
   const setFilter = (k: keyof Filters, v: string) => { setFilters(f => ({ ...f, [k]: v })); setPage(1) }
   const totalPages = Math.ceil(total / 50)
@@ -863,7 +929,10 @@ export function CallsTable({ dateFrom, dateTo, publisherScope = '' }: { dateFrom
                       <td className="px-3 py-3 whitespace-nowrap">
                         {(() => {
                           const fe = (analysis as any)?.final_expense
-                          const score = computeFELeadQuality(fe)
+                          const score = computeFELeadQuality(fe, {
+                            call_outcome: (analysis as any)?.call_outcome,
+                            flags: (analysis as any)?.flags ?? call.flags ?? null,
+                          })
                           if (score == null) return <span style={{ color: 'var(--rb-text-3)' }} className="text-xs">—</span>
                           const color = score >= 70 ? '#12b76a' : score >= 40 ? '#f79009' : '#f04438'
                           const bg = score >= 70 ? '#0d2e1e' : score >= 40 ? 'var(--rb-borderline-bg)' : 'var(--rb-disqualified-bg)'

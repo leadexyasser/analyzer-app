@@ -1,5 +1,7 @@
-// Fixed UTC-5 (EST) — no daylight saving flip
-export const ET = 'Etc/GMT+5'
+// America/New_York — auto-adjusts for EDT (UTC-4) vs EST (UTC-5).
+// Was previously hard-coded to 'Etc/GMT+5' which drifted 1 hour during DST months
+// (March-November) — making "Today" miss any calls that landed in the drift window.
+export const ET = 'America/New_York'
 
 /** Today's date in ET as "YYYY-MM-DD" */
 export function etTodayStr(base = new Date()): string {

@@ -11,6 +11,9 @@ export interface UtmRow {
   payout: number
   duplicates: number
   avgQuality: number | null
+  // Null when no calls in this UTM bucket have final_expense analysis — render "—" not "0".
+  complianceScore: number | null
+  complianceTotal: number
 }
 
 export type UtmTag = 'utm_content' | 'utm_source' | 'utm_medium' | 'utm_campaign' | 'utm_id'
@@ -19,7 +22,7 @@ interface Props {
   byUtm: Record<UtmTag, UtmRow[]>
 }
 
-type SortCol = 'name' | 'incoming' | 'completed' | 'closed' | 'closeRate' | 'revenue' | 'cpa' | 'avgQuality'
+type SortCol = 'name' | 'incoming' | 'completed' | 'closed' | 'closeRate' | 'revenue' | 'cpa' | 'avgQuality' | 'compliance'
 type SortDir = 'asc' | 'desc'
 
 const TAG_LABELS: { key: UtmTag; label: string }[] = [
@@ -105,6 +108,7 @@ export function UtmBreakdown({ byUtm }: Props) {
           case 'revenue':    return r.revenue
           case 'cpa':        return d.cpa
           case 'avgQuality': return r.avgQuality
+          case 'compliance': return r.complianceScore
         }
       }
       const va = valueOf(a, da)
@@ -129,12 +133,17 @@ export function UtmBreakdown({ byUtm }: Props) {
       duplicates: acc.duplicates + r.duplicates,
       qSum: acc.qSum + (r.avgQuality ?? 0),
       qCount: acc.qCount + (r.avgQuality != null ? 1 : 0),
+      // Weight each row's compliance score by its complianceTotal so buckets with 200 analyzed
+      // calls carry more weight than one-off rows — matches how the header-level score is built.
+      cWeighted: acc.cWeighted + (r.complianceScore != null ? r.complianceScore * r.complianceTotal : 0),
+      cWeight:   acc.cWeight   + (r.complianceScore != null ? r.complianceTotal : 0),
     }),
-    { incoming: 0, completed: 0, closed: 0, revenue: 0, payout: 0, duplicates: 0, qSum: 0, qCount: 0 }
+    { incoming: 0, completed: 0, closed: 0, revenue: 0, payout: 0, duplicates: 0, qSum: 0, qCount: 0, cWeighted: 0, cWeight: 0 }
   )
   const totalAvgQuality = totals.qCount > 0 ? Math.round(totals.qSum / totals.qCount) : null
   const totalCloseRate  = totals.completed > 0 ? Math.round((totals.closed / totals.completed) * 100) : null
   const totalCpa        = totals.closed > 0 ? totals.revenue / totals.closed : null
+  const totalCompliance = totals.cWeight > 0 ? Math.round(totals.cWeighted / totals.cWeight) : null
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: 'var(--rb-surface)', border: '1px solid var(--rb-border)' }}>
@@ -169,12 +178,13 @@ export function UtmBreakdown({ byUtm }: Props) {
               <SortableTH col="revenue"    right sort={sort} setSort={setSort}>Revenue</SortableTH>
               <SortableTH col="cpa"        right sort={sort} setSort={setSort}>CPA</SortableTH>
               <SortableTH col="avgQuality" right sort={sort} setSort={setSort}>Avg Quality</SortableTH>
+              <SortableTH col="compliance" right sort={sort} setSort={setSort}>Compliance</SortableTH>
             </tr>
           </thead>
           <tbody>
             {sortedRows.length === 0 ? (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <div className="flex flex-col items-center justify-center py-10 gap-2">
                     <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--rb-text-3)' }}>
                       <circle cx="14" cy="14" r="11" /><path d="M9 14h10M14 9v10" strokeLinecap="round" opacity=".4" />
@@ -231,6 +241,16 @@ export function UtmBreakdown({ byUtm }: Props) {
                               {row.avgQuality}
                             </span>}
                       </TD>
+                      <TD right>
+                        {row.complianceScore == null
+                          ? <span style={{ color: 'var(--rb-text-3)' }} title="No analyzed calls in this bucket yet">—</span>
+                          : <span
+                              style={{ color: row.complianceScore >= 90 ? 'var(--rb-green)' : row.complianceScore >= 80 ? 'var(--rb-amber)' : 'var(--rb-red)' }}
+                              title={`${row.complianceTotal} analyzed`}
+                            >
+                              {row.complianceScore}
+                            </span>}
+                      </TD>
                     </tr>
                   )
                 })}
@@ -253,6 +273,14 @@ export function UtmBreakdown({ byUtm }: Props) {
                       : 'var(--rb-red)',
                   }}>
                     {totalAvgQuality ?? '—'}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs font-bold text-right" style={{
+                    color: totalCompliance == null ? 'var(--rb-text-3)'
+                      : totalCompliance >= 90 ? 'var(--rb-green)'
+                      : totalCompliance >= 80 ? 'var(--rb-amber)'
+                      : 'var(--rb-red)',
+                  }}>
+                    {totalCompliance ?? '—'}
                   </td>
                 </tr>
               </>

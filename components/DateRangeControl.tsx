@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 
 const PRESETS = [
   { label: 'Today',     days: 0 },
+  { label: '24h',       days: 1 },  // Rolling 24 hours — bypasses timezone confusion
   { label: 'Yesterday', days: 0 },
   { label: '7d',        days: 7 },
   { label: '30d',       days: 30 },

@@ -15,8 +15,10 @@ export async function GET(request: NextRequest) {
   const offset = (page - 1) * limit
 
   const publisherScope = searchParams.get('publisher_scope')
+  const campaignScope = searchParams.get('campaign_scope')
   const status = searchParams.get('status')
   const campaign = searchParams.get('campaign')
+  const utmCampaign = searchParams.get('utm_campaign')
   const buyer = searchParams.get('buyer')
   const publisher = searchParams.get('publisher')
   const targetName = searchParams.get('target_name')
@@ -44,8 +46,10 @@ export async function GET(request: NextRequest) {
   }
 
   if (publisherScope) add(`publisher_name = ?`, publisherScope)
+  if (campaignScope)  add(`campaign_name = ?`, campaignScope)
   if (status)         add(`status = ?`, status)
   if (campaign)       add(`campaign_name ILIKE ?`, `%${campaign}%`)
+  if (utmCampaign)    add(`metadata->>'utm_campaign' ILIKE ?`, `%${utmCampaign}%`)
   if (buyer)          add(`buyer_name ILIKE ?`, `%${buyer}%`)
   if (publisher)      add(`publisher_name ILIKE ?`, `%${publisher}%`)
   if (targetName)     add(`target_name ILIKE ?`, `%${targetName}%`)

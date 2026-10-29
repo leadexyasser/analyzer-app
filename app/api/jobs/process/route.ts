@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { runWorker } from '@/lib/worker'
 
 export const runtime = 'nodejs'
-// 90s: runWorker uses a 75s deadline internally, leaving 15s headroom for the response.
-export const maxDuration = 90
+// 300s: runWorker uses a 270s deadline internally, leaving 30s headroom for the response.
+// Bumped from 90s because runWorker's Promise.all doesn't check the deadline mid-batch, so
+// a full 3-job analyze batch on long transcripts can overshoot 90s before the loop exits.
+export const maxDuration = 300
 
 function isAuthorized(request: NextRequest): boolean {
   const auth = request.headers.get('authorization')

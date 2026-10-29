@@ -15,7 +15,9 @@ function relativeTime(d: Date): string {
 
 export function AutoRefresh() {
   const router = useRouter()
-  const [auto, setAuto] = useState(false)
+  // Default ON — the dashboard is stale within 30s of a new webhook, and users kept
+  // asking "why isn't my call showing" because they didn't know to toggle this on.
+  const [auto, setAuto] = useState(true)
   const [isPending, startTransition] = useTransition()
   const [countdown, setCountdown] = useState(INTERVAL_MS / 1000)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)

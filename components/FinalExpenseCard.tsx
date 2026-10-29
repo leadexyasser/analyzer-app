@@ -1,8 +1,12 @@
 'use client'
 
 import { FinalExpenseQualifier } from '@/types/analysis'
+import { isPrematureHangup } from '@/lib/fe-scoring'
 
-interface Props { data: FinalExpenseQualifier }
+interface Props {
+  data: FinalExpenseQualifier
+  callContext?: { call_outcome?: string | null; flags?: string[] | null }
+}
 
 type Signal = 'good' | 'warn' | 'bad' | 'neutral'
 
@@ -72,7 +76,28 @@ function Ring({ score }: { score: number }) {
   )
 }
 
-export function FinalExpenseCard({ data }: Props) {
+export function FinalExpenseCard({ data, callContext }: Props) {
+  // If the call hung up before qualifying, the qualifier score is meaningless — render a
+  // neutral "not scored" panel instead of a big red "Disqualified · 0" ring.
+  if (callContext && isPrematureHangup(callContext)) {
+    return (
+      <div className="space-y-4">
+        <div
+          className="rounded-xl px-5 py-4 flex items-start gap-3"
+          style={{ background: '#141e2d', border: '1px solid #1e2d40' }}
+        >
+          <span className="text-2xl shrink-0">⏱</span>
+          <div>
+            <p className="text-sm font-bold" style={{ color: '#7a8fa6' }}>Not scored</p>
+            <p className="text-xs mt-1" style={{ color: 'var(--rb-text-3)' }}>
+              {data.qualifier_summary || 'Call ended before caller spoke — no qualification signal to assess.'}
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const VERDICT = {
     qualified:       { bg: 'var(--rb-qualified-bg)', border: 'var(--rb-qualified-border)', text: 'var(--rb-qualified-text)', label: 'Qualified' },
     borderline:      { bg: 'var(--rb-borderline-bg)', border: 'var(--rb-borderline-border)', text: 'var(--rb-borderline-text)', label: 'Borderline' },
