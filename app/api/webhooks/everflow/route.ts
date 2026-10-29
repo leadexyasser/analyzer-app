@@ -39,16 +39,25 @@ function toNumber(v: string | null): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-/** Accepts a unix timestamp (s or ms) or an ISO string; null when absent or unparseable. */
-function toTimestamp(params: URLSearchParams): string | null {
+/**
+ * Accepts a unix timestamp (s or ms) or an ISO string.
+ *
+ * Falls back to arrival time because this network sends `conv_time` empty — without a
+ * fallback every conversion would carry a null date and drop out of any daily rollup.
+ * Postbacks fire within seconds of the conversion, so arrival time is accurate to the
+ * day, which is the grain the reporting uses.
+ */
+function toTimestamp(params: URLSearchParams): string {
   const raw = pick(params, ['conv_time', 'conversion_unix_timestamp', 'timestamp', 'datetime'])
-  if (raw === null) return null
-  const asNum = Number(raw)
-  if (Number.isFinite(asNum) && asNum > 0) {
-    return new Date(asNum > 1e11 ? asNum : asNum * 1000).toISOString()
+  if (raw !== null) {
+    const asNum = Number(raw)
+    if (Number.isFinite(asNum) && asNum > 0) {
+      return new Date(asNum > 1e11 ? asNum : asNum * 1000).toISOString()
+    }
+    const parsed = new Date(raw)
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
   }
-  const parsed = new Date(raw)
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+  return new Date().toISOString()
 }
 
 async function handle(request: NextRequest, body: Record<string, string>) {
@@ -94,7 +103,10 @@ async function handle(request: NextRequest, body: Record<string, string>) {
        status        = coalesce(excluded.status,        network_conversions.status),
        payout        = coalesce(excluded.payout,        network_conversions.payout),
        revenue       = coalesce(excluded.revenue,       network_conversions.revenue),
-       converted_at  = coalesce(excluded.converted_at,  network_conversions.converted_at),
+       -- Keep the ORIGINAL date. Since converted_at now falls back to arrival time, a
+       -- reversal landing days later would otherwise drag the conversion into the day
+       -- it was reversed and silently distort every daily total either side.
+       converted_at  = coalesce(network_conversions.converted_at, excluded.converted_at),
        raw           = excluded.raw,
        updated_at    = now()`,
     [
