@@ -1,8 +1,10 @@
 import {
-  availableMonths, ECOMFY_SHARE, fetchCreatives, fetchDaily, fetchHooks,
-  monthWindow, spendAgeMinutes, STALE_AFTER_MINUTES, YASSER_SHARE,
+  availableMonths, ECOMFY_SHARE, fetchCreatives, fetchDaily, fetchHooks, fetchTikTokAds,
+  monthWindow, spendAgeMinutes, STALE_AFTER_MINUTES, tiktokSpendAgeMinutes, YASSER_SHARE,
 } from '@/lib/analysis'
 import { syncMetaSpend } from '@/lib/meta-sync'
+import { tiktokConfigured } from '@/lib/tiktok'
+import { syncTikTokSpend } from '@/lib/tiktok-sync'
 
 // The buyer's daily commitment, shown as a target against today's conversions.
 const DAILY_CAP = 125
@@ -41,39 +43,59 @@ function dayLabel(iso: string): string {
 const NEG = '#e5484d'
 
 /**
- * Re-syncs only when stored spend has gone stale, or on ?refresh=1. A Meta outage must
- * not blank the page, so failures surface as a banner over the last stored figures.
+ * Re-syncs a source only when its stored spend has gone stale, or on ?refresh=1. An API
+ * outage must not blank the page, so failures surface as a banner over the last stored
+ * figures. Each source syncs independently: a TikTok failure never blocks Meta.
  */
-async function refreshIfStale(force: boolean): Promise<string | null> {
+async function refreshSource(
+  name: string,
+  ageMinutes: () => Promise<number | null>,
+  sync: () => Promise<unknown>,
+  force: boolean
+): Promise<string | null> {
   try {
-    const age = await spendAgeMinutes()
-    if (force || age === null || age > STALE_AFTER_MINUTES) await syncMetaSpend()
+    const age = await ageMinutes()
+    if (force || age === null || age > STALE_AFTER_MINUTES) await sync()
     return null
   } catch (error: unknown) {
-    return error instanceof Error ? error.message : 'Spend sync failed'
+    return `${name}: ${error instanceof Error ? error.message : 'spend sync failed'}`
   }
+}
+
+function syncedLabel(source: string, age: number | null): string {
+  if (age === null) return `${source} never synced`
+  return `${source} ${age < 1 ? 'just now' : `${Math.round(age)}m ago`}`
 }
 
 export async function AnalysisDashboard({ campaignScope, searchParams }: Props) {
   const win = monthWindow(searchParams.month)
-  const syncError = await refreshIfStale(searchParams.refresh === '1')
+  const force = searchParams.refresh === '1'
+  const hasTikTok = tiktokConfigured()
+  const syncErrors = (await Promise.all([
+    refreshSource('Facebook', spendAgeMinutes, () => syncMetaSpend(), force),
+    hasTikTok ? refreshSource('TikTok', tiktokSpendAgeMinutes, () => syncTikTokSpend(), force) : Promise.resolve(null),
+  ])).filter((e): e is string => e !== null)
 
-  const [daily, creatives, hooks, ageMinutes, months] = await Promise.all([
+  const [daily, creatives, hooks, tiktokAds, ageMinutes, tiktokAge, months] = await Promise.all([
     fetchDaily(campaignScope, win.since, win.until),
     fetchCreatives(campaignScope, win.since, win.until),
     fetchHooks(win.since, win.until),
+    fetchTikTokAds(campaignScope, win.since, win.until),
     spendAgeMinutes(),
+    tiktokSpendAgeMinutes(),
     availableMonths(),
   ])
 
   const t = daily.reduce(
     (a, d) => ({
       spend: a.spend + d.spend,
+      meta: a.meta + d.meta_spend,
+      tiktok: a.tiktok + d.tiktok_spend,
       paid: a.paid + d.paid_calls,
       policies: a.policies + d.policies,
       revenue: a.revenue + d.revenue_effective,
     }),
-    { spend: 0, paid: 0, policies: 0, revenue: 0 }
+    { spend: 0, meta: 0, tiktok: 0, paid: 0, policies: 0, revenue: 0 }
   )
   const netPool = t.revenue - t.spend
   const activeDays = daily.filter(d => d.spend > 0).length
@@ -97,7 +119,7 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
         </div>
         <div className="flex items-center gap-2 text-[11px]">
           <span style={{ color: '#8b94a3' }}>
-            {ageMinutes === null ? 'never synced' : `synced ${ageMinutes < 1 ? 'just now' : `${Math.round(ageMinutes)}m ago`}`}
+            synced · {syncedLabel('FB', ageMinutes)} · {hasTikTok || tiktokAge !== null ? syncedLabel('TikTok', tiktokAge) : 'TikTok not connected'}
           </span>
           {months.slice(0, 4).map(m => (
             <a key={m} href={`?month=${m}`} className="px-2 py-1 rounded"
@@ -111,15 +133,16 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
         </div>
       </header>
 
-      {syncError && (
-        <p className="text-xs px-3 py-2 rounded" style={{ background: '#ff000014', color: NEG }}>
-          Spend sync failed — showing the last successful pull. {syncError}
+      {syncErrors.map(err => (
+        <p key={err} className="text-xs px-3 py-2 rounded" style={{ background: '#ff000014', color: NEG }}>
+          Spend sync failed — showing the last successful pull. {err}
         </p>
-      )}
+      ))}
 
       {today && (
         <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Stat label={`Spend · ${dayLabel(today.stat_date)}`} value={`$${money(today.spend, 0)}`} />
+          <Stat label={`Spend · ${dayLabel(today.stat_date)}`} value={`$${money(today.spend, 0)}`}
+            sub={`FB $${money(today.meta_spend, 0)} · TikTok $${money(today.tiktok_spend, 0)}`} />
           <Stat label="Revenue today" value={`$${money(today.revenue_effective, 0)}`} />
           <Stat label="Net profit today" value={`$${money(todayProfit, 0)}`} tone={todayProfit < 0 ? 'neg' : 'pos'} />
           <Stat label="ROI today" value={pct(ratio(todayProfit, today.spend))} tone={todayProfit < 0 ? 'neg' : 'pos'} />
@@ -136,7 +159,7 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr style={{ background: '#161b23' }}>
-                  {['DATE', 'SPEND', 'CALLS', 'REVENUE', 'NET PROFIT', 'ROI', `YASSER ${YASSER_SHARE * 100}%`, `ECOMFY ${ECOMFY_SHARE * 100}%`]
+                  {['DATE', 'FACEBOOK', 'TIKTOK', 'SPEND', 'CALLS', 'REVENUE', 'NET PROFIT', 'ROI', `YASSER ${YASSER_SHARE * 100}%`, `ECOMFY ${ECOMFY_SHARE * 100}%`]
                     .map((h, i) => (
                       <th key={h} className={`px-3 py-2 text-[10px] font-semibold tracking-wider whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}
                         style={{ color: '#8b94a3' }}>{h}</th>
@@ -151,6 +174,8 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
                   return (
                     <tr key={d.stat_date} style={{ borderTop: '1px solid #ffffff0d', opacity: idle ? 0.45 : 1 }}>
                       <Cell first>{dayLabel(d.stat_date)}</Cell>
+                      <Cell muted>{idle ? '—' : `$${money(d.meta_spend)}`}</Cell>
+                      <Cell muted>{idle ? '—' : `$${money(d.tiktok_spend)}`}</Cell>
                       <Cell>{idle ? '—' : `$${money(d.spend)}`}</Cell>
                       <Cell>{idle ? '—' : String(d.paid_calls)}</Cell>
                       <Cell>{idle ? '—' : `$${money(d.revenue_effective)}`}</Cell>
@@ -165,6 +190,8 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
               <tfoot>
                 <tr style={{ background: '#11151c' }}>
                   <Cell first bold>TOTAL · {win.label.split(' ')[0].toUpperCase()}</Cell>
+                  <Cell bold>${money(t.meta)}</Cell>
+                  <Cell bold>${money(t.tiktok)}</Cell>
                   <Cell bold>${money(t.spend)}</Cell>
                   <Cell bold>{t.paid}</Cell>
                   <Cell bold>${money(t.revenue)}</Cell>
@@ -191,6 +218,8 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
           </SummaryPanel>
 
           <SummaryPanel title="MONTH TO DATE">
+            <Line label="Facebook spend" value={`$${money(t.meta)}`} />
+            <Line label="TikTok spend" value={`$${money(t.tiktok)}`} />
             <Line label="Ad spend" value={`$${money(t.spend)}`} />
             <Line label="Revenue" value={`$${money(t.revenue)}`} />
             <Line label="Net profit pool" value={`$${money(netPool)}`} strong tone={netPool < 0 ? 'neg' : undefined} />
@@ -242,6 +271,23 @@ export async function AnalysisDashboard({ campaignScope, searchParams }: Props) 
           ])}
         />
       </Panel>
+
+      <Panel title="TikTok by ad">
+        <Table
+          head={['Ad', 'Campaign', 'Spend', 'TikTok conv', 'Calls', 'Paid calls', 'Revenue', 'Cost/paid', 'ROI']}
+          rows={tiktokAds.map(a => [
+            a.ad_name ?? '(untagged)',
+            a.campaign_name ?? '—',
+            `$${money(a.spend, 0)}`,
+            String(a.tiktok_conversions),
+            String(a.calls),
+            String(a.paid_calls),
+            `$${money(a.revenue_at_28, 0)}`,
+            perUnit(a.spend, a.paid_calls),
+            a.spend > 0 ? pct(ratio(a.revenue_at_28 - a.spend, a.spend)) : '—',
+          ])}
+        />
+      </Panel>
     </main>
   )
 }
@@ -253,22 +299,24 @@ function toneColor(tone?: 'neg' | 'pos' | 'accent'): string {
   return 'var(--rb-text-1)'
 }
 
-function Cell({ children, first, bold, tone }: {
-  children: React.ReactNode; first?: boolean; bold?: boolean; tone?: 'neg' | 'pos' | 'accent'
+function Cell({ children, first, bold, muted, tone }: {
+  children: React.ReactNode; first?: boolean; bold?: boolean; muted?: boolean; tone?: 'neg' | 'pos' | 'accent'
 }) {
+  const color = tone ? toneColor(tone) : first || muted ? 'var(--rb-text-2)' : 'var(--rb-text-1)'
   return (
     <td
       className={`px-3 py-1.5 whitespace-nowrap ${first ? 'text-left' : 'text-right tabular-nums'} ${bold ? 'font-bold' : ''}`}
-      style={{ color: tone ? toneColor(tone) : first ? 'var(--rb-text-2)' : 'var(--rb-text-1)' }}
+      style={{ color }}
     >{children}</td>
   )
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'neg' | 'pos' }) {
+function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'neg' | 'pos' }) {
   return (
     <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--rb-surface-2)' }}>
       <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--rb-text-3)' }}>{label}</p>
       <p className="text-lg font-bold mt-0.5" style={{ color: toneColor(tone) }}>{value}</p>
+      {sub && <p className="text-[10px] mt-0.5 tabular-nums" style={{ color: 'var(--rb-text-3)' }}>{sub}</p>}
     </div>
   )
 }

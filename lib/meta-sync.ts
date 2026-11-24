@@ -1,4 +1,5 @@
 import { withTx } from '@/lib/db'
+import { placeholders } from '@/lib/sql'
 import { etTodayStr, shiftDateStr } from '@/lib/time'
 import { fetchAccountDaily, fetchAdDaily, metaAdAccountIds, type MetaAccountDay, type MetaAdDay } from '@/lib/meta'
 
@@ -22,12 +23,6 @@ export type SyncSummary = {
   synced_at: string
 }
 
-/** Flattens rows into a parameterised multi-row VALUES list. */
-function placeholders(rowCount: number, colCount: number): string {
-  return Array.from({ length: rowCount }, (_, r) =>
-    `(${Array.from({ length: colCount }, (_, c) => `$${r * colCount + c + 1}`).join(',')})`
-  ).join(',')
-}
 
 /**
  * Re-pulls the trailing window from Meta and overwrites those days.

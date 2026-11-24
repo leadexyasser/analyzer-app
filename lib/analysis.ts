@@ -5,11 +5,13 @@ import { ET, etTodayStr } from '@/lib/time'
 export const YASSER_SHARE = 0.8
 export const ECOMFY_SHARE = 0.2
 
-// Insurance Supermarket bills most calls at $28 but some at $35. The operator reasons in
-// flat $28, so both are reported: `revenue_at_28` for planning, `revenue_actual` for the
-// books and the revenue split.
+// Insurance Supermarket's (4213) target bills most calls at $28 but some at $35. The
+// operator reasons in flat $28, so both are reported: `revenue_at_28` for planning,
+// `revenue_actual` for the books and the revenue split. The flat rate applies to the 4213
+// target only: ISI's (4322) overflow line pays $16 and must keep its real value, so this
+// matches on the target, not the buyer.
 const ISI_FLAT_RATE = 28
-const ISI_BUYER_PREFIX = 'Insurance Supermarket%'
+const ISI_FLAT_TARGET_PREFIX = '(4213)%'
 
 // Spend is considered stale after this, at which point the page re-syncs on load.
 export const STALE_AFTER_MINUTES = 30
@@ -26,7 +28,10 @@ export const WEBHOOK_FULL_DAYS_FROM = '2026-10-30'
 
 export type DailyRow = {
   stat_date: string
+  /** Facebook + TikTok. Revenue covers calls from both, so profit must subtract both. */
   spend: number
+  meta_spend: number
+  tiktok_spend: number
   impressions: number
   link_clicks: number
   pixel_raw_calls: number
@@ -83,6 +88,12 @@ spend as (
   where stat_date between $1::date and $2::date
   group by stat_date
 ),
+tiktok as (
+  select stat_date, sum(spend) as spend
+  from tiktok_daily_spend
+  where stat_date between $1::date and $2::date
+  group by stat_date
+),
 call_agg as (
   select (call_started_at at time zone '${ET}')::date as stat_date,
          count(*)                                              as connected_calls,
@@ -90,7 +101,7 @@ call_agg as (
          count(*) filter (where analysis->>'call_outcome' = 'sale_closed') as policies,
          coalesce(sum(revenue), 0)                              as revenue_actual,
          coalesce(sum(case
-           when buyer_name like $4 and revenue > 0 then ${ISI_FLAT_RATE}
+           when target_name like $4 and revenue > 0 then ${ISI_FLAT_RATE}
            else revenue
          end), 0)                                               as revenue_at_28
   from calls
@@ -115,7 +126,9 @@ settled as (
   group by stat_date
 )
 select to_char(d.stat_date, 'YYYY-MM-DD')          as stat_date,
-       coalesce(s.spend, 0)::float8                as spend,
+       (coalesce(s.spend, 0) + coalesce(k.spend, 0))::float8 as spend,
+       coalesce(s.spend, 0)::float8                as meta_spend,
+       coalesce(k.spend, 0)::float8                as tiktok_spend,
        coalesce(s.impressions, 0)::int             as impressions,
        coalesce(s.link_clicks, 0)::int             as link_clicks,
        coalesce(s.pixel_raw_calls, 0)::int         as pixel_raw_calls,
@@ -141,6 +154,7 @@ select to_char(d.stat_date, 'YYYY-MM-DD')          as stat_date,
        end                                         as revenue_source
 from days d
 left join spend    s on s.stat_date = d.stat_date
+left join tiktok   k on k.stat_date = d.stat_date
 left join call_agg c on c.stat_date = d.stat_date
 left join webhook  w on w.stat_date = d.stat_date
 left join settled  t on t.stat_date = d.stat_date
@@ -173,7 +187,7 @@ export function previousMonth(month: string): string {
 }
 
 export async function fetchDaily(campaignScope: string, since: string, until: string): Promise<DailyRow[]> {
-  return many<DailyRow>(DAILY_SQL, [since, until, campaignScope, ISI_BUYER_PREFIX, WEBHOOK_FULL_DAYS_FROM])
+  return many<DailyRow>(DAILY_SQL, [since, until, campaignScope, ISI_FLAT_TARGET_PREFIX, WEBHOOK_FULL_DAYS_FROM])
 }
 
 /**
@@ -202,13 +216,15 @@ call_agg as (
          count(*) filter (where analysis->'final_expense'->>'qualifier_verdict' = 'compliance_risk') as compliance_risk,
          count(*) filter (where analysis is not null)                        as analyzed,
          coalesce(sum(case
-           when buyer_name like $4 and revenue > 0 then ${ISI_FLAT_RATE}
+           when target_name like $4 and revenue > 0 then ${ISI_FLAT_RATE}
            else revenue
          end), 0)                                                            as revenue_at_28
   from calls
   where campaign_name = $3
     and (call_started_at at time zone '${ET}')::date between $1::date and $2::date
     and metadata->>'utm_content' is not null
+    -- TikTok calls carry utm_content='TikTok'; they are reported in their own panel.
+    and coalesce(metadata->>'utm_source', '') not ilike 'tiktok%'
   group by 1
 )
 select coalesce(s.creative, c.creative)        as creative,
@@ -226,7 +242,7 @@ order by spend desc
 `
 
 export async function fetchCreatives(campaignScope: string, since: string, until: string): Promise<CreativeRow[]> {
-  return many<CreativeRow>(CREATIVE_SQL, [since, until, campaignScope, ISI_BUYER_PREFIX])
+  return many<CreativeRow>(CREATIVE_SQL, [since, until, campaignScope, ISI_FLAT_TARGET_PREFIX])
 }
 
 /**
@@ -253,6 +269,70 @@ order by spend desc
 
 export async function fetchHooks(since: string, until: string): Promise<HookRow[]> {
   return many<HookRow>(HOOKS_SQL, [since, until])
+}
+
+export type TikTokAdRow = {
+  campaign_name: string | null
+  ad_name: string | null
+  spend: number
+  tiktok_conversions: number
+  calls: number
+  paid_calls: number
+  revenue_at_28: number
+}
+
+/**
+ * Per-ad TikTok view WITH revenue. Unlike Meta, TikTok calls carry the campaign name in
+ * utm_id and the exact ad name in utm_medium, so each call maps to one ad. Keyed on
+ * (campaign, ad) because the same ad name can run in two campaigns.
+ */
+const TIKTOK_ADS_SQL = `
+with spend as (
+  select campaign_name, ad_name,
+         sum(spend)       as spend,
+         sum(conversions) as tiktok_conversions
+  from tiktok_daily_ad_spend
+  where stat_date between $1::date and $2::date
+  group by 1, 2
+),
+call_agg as (
+  select metadata->>'utm_id'     as campaign_name,
+         metadata->>'utm_medium' as ad_name,
+         count(*)                as calls,
+         count(*) filter (where revenue > 0) as paid_calls,
+         coalesce(sum(case
+           when target_name like $4 and revenue > 0 then ${ISI_FLAT_RATE}
+           else revenue
+         end), 0)                as revenue_at_28
+  from calls
+  where campaign_name = $3
+    and (call_started_at at time zone '${ET}')::date between $1::date and $2::date
+    and metadata->>'utm_source' ilike 'tiktok%'
+  group by 1, 2
+)
+select coalesce(s.campaign_name, c.campaign_name) as campaign_name,
+       coalesce(s.ad_name, c.ad_name)             as ad_name,
+       coalesce(s.spend, 0)::float8               as spend,
+       coalesce(s.tiktok_conversions, 0)::int     as tiktok_conversions,
+       coalesce(c.calls, 0)::int                  as calls,
+       coalesce(c.paid_calls, 0)::int             as paid_calls,
+       coalesce(c.revenue_at_28, 0)::float8       as revenue_at_28
+from spend s
+full outer join call_agg c on c.campaign_name = s.campaign_name and c.ad_name = s.ad_name
+order by spend desc, revenue_at_28 desc
+`
+
+export async function fetchTikTokAds(campaignScope: string, since: string, until: string): Promise<TikTokAdRow[]> {
+  return many<TikTokAdRow>(TIKTOK_ADS_SQL, [since, until, campaignScope, ISI_FLAT_TARGET_PREFIX])
+}
+
+/** Minutes since TikTok spend was last written, or null when it never has been. */
+export async function tiktokSpendAgeMinutes(): Promise<number | null> {
+  const row = await one<{ age_minutes: number | null }>(
+    `select extract(epoch from (now() - max(synced_at))) / 60 as age_minutes from tiktok_daily_spend`
+  )
+  const age = row?.age_minutes
+  return age === null || age === undefined ? null : Number(age)
 }
 
 export type MonthTotals = {
@@ -282,8 +362,10 @@ export async function fetchMonthTotals(campaignScope: string, month: string): Pr
 /** Months that have stored spend, newest first — drives the month picker. */
 export async function availableMonths(): Promise<string[]> {
   const rows = await many<{ month: string }>(
-    `select to_char(stat_date, 'YYYY-MM') as month
-     from meta_daily_spend group by 1 order by 1 desc`
+    `select to_char(stat_date, 'YYYY-MM') as month from meta_daily_spend
+     union
+     select to_char(stat_date, 'YYYY-MM') from tiktok_daily_spend
+     order by 1 desc`
   )
   const current = etTodayStr().slice(0, 7)
   return rows.some(r => r.month === current) ? rows.map(r => r.month) : [current, ...rows.map(r => r.month)]
